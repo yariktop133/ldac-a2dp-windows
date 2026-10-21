@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(ldac_a2dp C)
+project(ldac_a2dp C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -49,6 +49,17 @@ endif()
 # --- tools ------------------------------------------------------------------
 add_executable(ldacenc tools/ldacenc/ldacenc.c tools/ldacenc/wav.c)
 target_link_libraries(ldacenc PRIVATE ldacBT_abr ldacBT_enc avdtp)
+
+# --- encoder service (user mode) --------------------------------------------
+add_executable(ldacsvc
+    service/main.cpp service/settings.cpp service/capture.cpp service/resampler.cpp
+    service/encoder.cpp service/sinks.cpp tools/ldacenc/wav.c)
+target_compile_features(ldacsvc PRIVATE cxx_std_17)
+target_compile_definitions(ldacsvc PRIVATE UNICODE _UNICODE NOMINMAX)
+target_link_libraries(ldacsvc PRIVATE ldacBT_abr ldacBT_enc avdtp ole32 cfgmgr32)
+if(MSVC)
+    target_compile_options(ldacsvc PRIVATE /W4 /utf-8)
+endif()
 
 # --- tests ------------------------------------------------------------------
 enable_testing()
