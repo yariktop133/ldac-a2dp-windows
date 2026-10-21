@@ -1,0 +1,8 @@
+build/
+ui/**/bin/
+ui/**/obj/
+*.user
+.vs/
+captures/
+btp/
+__pycache__/

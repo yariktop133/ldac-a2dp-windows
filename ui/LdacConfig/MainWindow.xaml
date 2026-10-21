@@ -1,0 +1,267 @@
+<Window x:Class="LdacConfig.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LdacConfig"
+        Title="LDAC A2DP Driver Configuration"
+        Width="1160" Height="1000" MinWidth="900" MinHeight="600"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <local:EnumEqualsConverter x:Key="EnumEquals" />
+        <local:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis" />
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="400" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ===== Navigation ===== -->
+        <DockPanel Grid.Column="0" Background="{StaticResource NavBackground}">
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,12">
+                <Button Style="{StaticResource NavLink}" Click="OnRefresh">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Text="&#xE72C;" FontSize="16" Margin="0,0,14,0" VerticalAlignment="Center" />
+                        <TextBlock Text="Обновить список" FontSize="16" />
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource NavLink}" Click="OnAbout">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Text="&#xE946;" FontSize="16" Margin="0,0,14,0" VerticalAlignment="Center" />
+                        <TextBlock Text="О приложении" FontSize="16" />
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource NavLink}" Click="OnFaq">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Text="&#xE897;" FontSize="16" Margin="0,0,14,0" VerticalAlignment="Center" />
+                        <TextBlock Text="FAQ" FontSize="16" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Top">
+                <TextBlock Text="Стереозвуковые устройства Bluetooth (A2DP)" FontSize="16" FontWeight="SemiBold"
+                           Margin="14,24,14,12" TextWrapping="Wrap" />
+                <TextBlock Text="Поиск сопряжённых устройств…" Margin="20,8" Foreground="{StaticResource SecondaryText}"
+                           Visibility="{Binding Loading, Converter={StaticResource BoolToVis}}" />
+                <TextBlock Margin="20,8" TextWrapping="Wrap" Foreground="{StaticResource SecondaryText}"
+                           Visibility="{Binding NoDevices, Converter={StaticResource BoolToVis}}"
+                           Text="Нет сопряжённых аудиоустройств Bluetooth. Выполните сопряжение в «Параметры → Bluetooth и устройства» и нажмите «Обновить список»." />
+            </StackPanel>
+
+            <ListBox ItemsSource="{Binding Devices}" SelectedItem="{Binding Selected}"
+                     Background="Transparent" BorderThickness="0" Margin="4,0">
+                <!-- Windows 11 navigation look: subtle fill plus an accent bar on the left -->
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Bd" Background="Transparent" CornerRadius="4" Margin="2,1">
+                                        <Grid>
+                                            <Border x:Name="Bar" Width="3" Height="18" CornerRadius="1.5" HorizontalAlignment="Left"
+                                                    Background="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed" />
+                                            <ContentPresenter Margin="12,4" />
+                                        </Grid>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#2D2D2D" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#2D2D2D" />
+                                            <Setter TargetName="Bar" Property="Visibility" Value="Visible" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="4,6">
+                            <TextBlock Text="{Binding Name}" FontSize="16" />
+                            <TextBlock Text="подключено" FontSize="12" Foreground="{StaticResource SecondaryText}"
+                                       Visibility="{Binding Connected, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+
+        <!-- ===== Pages ===== -->
+        <Grid Grid.Column="1" Background="{StaticResource PageBackground}">
+
+            <!-- Device settings -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding ShowDevice, Converter={StaticResource BoolToVis}}">
+                <StackPanel Margin="20,16,24,24" MaxWidth="720" HorizontalAlignment="Left"
+                            DataContext="{Binding Selected}"
+                            IsEnabled="{Binding DataContext.HasDevice, RelativeSource={RelativeSource AncestorType=Window}}">
+
+                    <TextBlock Text="Настройки устройства" FontSize="28" Margin="0,8,0,8" />
+                    <TextBlock Text="{Binding AddressText, StringFormat='Адрес: {0}'}" Foreground="{StaticResource SecondaryText}" />
+
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Драйвер устройства" />
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox Width="280" SelectedValuePath="Tag" SelectedValue="{Binding Settings.Driver}">
+                            <ComboBoxItem Content="LDAC A2DP Driver" Tag="{x:Static local:DriverChoice.Ldac}" />
+                            <ComboBoxItem Content="Штатный драйвер Microsoft" Tag="{x:Static local:DriverChoice.Microsoft}" />
+                        </ComboBox>
+                        <Button Content="Установить" Margin="40,0,0,0" IsEnabled="False"
+                                ToolTipService.ShowOnDisabled="True"
+                                ToolTip="Установка драйвера (INF + pnputil) появится на этапе 6. Сейчас выбор только сохраняется в настройках." />
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Настройки КОДЕКА" />
+                    <StackPanel Orientation="Horizontal">
+                        <StackPanel>
+                            <TextBlock Text="Тип КОДЕКА" FontSize="14" Margin="0,0,0,6" />
+                            <ComboBox Width="200" SelectedValuePath="Tag" SelectedValue="{Binding Settings.Codec}">
+                                <ComboBoxItem Content="LDAC" Tag="{x:Static local:CodecType.LDAC}" />
+                                <ComboBoxItem Content="SBC" Tag="{x:Static local:CodecType.SBC}" />
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource InfoIcon}" VerticalAlignment="Top" Margin="10,2,0,0">
+                            <TextBlock.ToolTip>
+                                <TextBlock MaxWidth="360" TextWrapping="Wrap"
+                                           Text="LDAC — кодек Sony (до 990 кбит/с, до 96 кГц / 24 бит). SBC — обязательный кодек A2DP, используется как запасной, если наушники отклонят LDAC." />
+                            </TextBlock.ToolTip>
+                        </TextBlock>
+                        <Button Margin="40,0,0,0" Width="440" VerticalAlignment="Stretch" Padding="12,8" HorizontalContentAlignment="Left"
+                                Click="OnPreset">
+                            <TextBlock TextWrapping="Wrap" Text="Загрузите для КОДЕКА наиболее часто используемые настройки" />
+                        </Button>
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource FieldLabel}" Margin="0,28,0,6"
+                               Text="Разрешить ОС/приложению выбирать режим канала между" />
+                    <StackPanel Orientation="Horizontal">
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="Моно" IsChecked="{Binding Settings.AllowMono}" />
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="Стерео" IsChecked="{Binding Settings.AllowStereo}" />
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Разрешить ОС/приложению выбирать частоту дискретизации между" />
+                    <StackPanel Orientation="Horizontal">
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="44.1 kHz" IsChecked="{Binding Settings.Rate44}" />
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="48 kHz" IsChecked="{Binding Settings.Rate48}" />
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="88.2 kHz" IsChecked="{Binding Settings.Rate88}"
+                                  Visibility="{Binding Settings.IsLdac, Converter={StaticResource BoolToVis}}" />
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="96 kHz" IsChecked="{Binding Settings.Rate96}"
+                                  Visibility="{Binding Settings.IsLdac, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Разрешить ОС/приложению выбирать битовое разрешение между" />
+                    <StackPanel Orientation="Horizontal">
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="16 бит" IsChecked="{Binding Settings.Bits16}" />
+                        <CheckBox Style="{StaticResource OptionCheck}" Content="24 бит" IsChecked="{Binding Settings.Bits24}" />
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Стерео-режим" />
+                    <ComboBox Width="280" HorizontalAlignment="Left"
+                              ItemsSource="{Binding Settings.ChannelModes}" SelectedItem="{Binding Settings.ChannelMode}" />
+
+                    <Button Content="(Пере)подключить устройство" HorizontalAlignment="Right" Margin="0,16,0,0"
+                            Padding="14,8" Click="OnReconnect" />
+
+                    <StackPanel Visibility="{Binding Settings.IsLdac, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Style="{StaticResource FieldLabel}" Text="Качество кодирования" />
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton GroupName="q" Content="MQ (низкое)" MinWidth="150"
+                                         IsChecked="{Binding Settings.Quality, Converter={StaticResource EnumEquals}, ConverterParameter=MQ}" />
+                            <RadioButton GroupName="q" Content="SQ (среднее)" MinWidth="150"
+                                         IsChecked="{Binding Settings.Quality, Converter={StaticResource EnumEquals}, ConverterParameter=SQ}" />
+                            <RadioButton GroupName="q" Content="HQ (высокое)" MinWidth="140"
+                                         IsChecked="{Binding Settings.Quality, Converter={StaticResource EnumEquals}, ConverterParameter=HQ}" />
+                            <TextBlock Style="{StaticResource InfoIcon}">
+                                <TextBlock.ToolTip>
+                                    <TextBlock MaxWidth="360" TextWrapping="Wrap"
+                                               Text="MQ — 330 кбит/с, SQ — 660 кбит/с, HQ — 990 кбит/с (для 44.1/88.2 кГц: 303/606/909). HQ требует хорошего радиоканала: при помехах будут заикания." />
+                                </TextBlock.ToolTip>
+                            </TextBlock>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <CheckBox Content="Автоматически снижать качество кодирования при плохом качестве радио"
+                                      IsChecked="{Binding Settings.Adaptive}" />
+                            <TextBlock Style="{StaticResource InfoIcon}">
+                                <TextBlock.ToolTip>
+                                    <TextBlock MaxWidth="360" TextWrapping="Wrap"
+                                               Text="Адаптивный битрейт libldac (ABR): по глубине очереди передачи опускает качество HQ → SQ → 492 → 396 → MQ и поднимает обратно после ~6 с стабильного канала." />
+                                </TextBlock.ToolTip>
+                            </TextBlock>
+                        </StackPanel>
+                        <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource SecondaryText}"
+                                   Text="Качество кодирования можно изменить в любое время, и оно задействуется при передаче следующего медиа-пакета." />
+                    </StackPanel>
+
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="Текущее состояние" Margin="0,32,0,12" />
+                    <Grid DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="240" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Тип КОДЕКА" Margin="0,3" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding StatusCodec}" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Text="Режим канала" Margin="0,3" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding StatusChannelMode}" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Text="Частота дискретизации" Margin="0,3" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding StatusSampleRate}" Margin="0,3" />
+                        <TextBlock Grid.Row="3" Text="Битовое разрешение" Margin="0,3" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding StatusBitDepth}" Margin="0,3" />
+                        <TextBlock Grid.Row="4" Text="Скорость потока" Margin="0,3" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding StatusBitrate}" Margin="0,3" />
+                        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Foreground="{StaticResource SecondaryText}"
+                                   Text="Нет данных: служба кодирования не запущена (драйвер ещё не установлен)."
+                                   Visibility="{Binding HasStatus, Converter={StaticResource InverseBoolToVis}}" />
+                    </Grid>
+
+                    <TextBlock Margin="0,20,0,0" TextWrapping="Wrap" Foreground="{StaticResource SecondaryText}"
+                               Text="{Binding DataContext.Message, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- About -->
+            <StackPanel Margin="20,24" MaxWidth="720" HorizontalAlignment="Left"
+                        Visibility="{Binding ShowAbout, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="О приложении" FontSize="28" Margin="0,0,0,16" />
+                <TextBlock TextWrapping="Wrap" FontSize="14" LineHeight="22">
+                    LDAC A2DP Driver — собственный A2DP-источник для Windows: AVDTP-сигналинг,
+                    кодирование libldac (AOSP, Apache 2.0) и запасной SBC.
+                    <LineBreak /><LineBreak />
+                    Утилита хранит настройки каждого устройства в файле:
+                </TextBlock>
+                <TextBox IsReadOnly="True" Text="{Binding SettingsPath, Mode=OneWay}" Margin="0,8,0,0" />
+                <TextBlock TextWrapping="Wrap" FontSize="14" Margin="0,16,0,0" Foreground="{StaticResource SecondaryText}">
+                    Состояние проекта: ядро протокола и кодировщик готовы и проверены на симуляторе;
+                    драйвер ядра (этап 4) и служба кодирования ещё не установлены.
+                </TextBlock>
+            </StackPanel>
+
+            <!-- FAQ -->
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding ShowFaq, Converter={StaticResource BoolToVis}}">
+                <StackPanel Margin="20,24" MaxWidth="720" HorizontalAlignment="Left">
+                    <TextBlock Text="FAQ" FontSize="28" Margin="0,0,0,16" />
+                    <TextBlock FontWeight="SemiBold" FontSize="16" Text="Почему 96 кГц не выбирается?" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
+                               Text="Частоту выбирают обе стороны: если наушники не объявляют 96 кГц в своих возможностях LDAC, будет выбрана максимальная общая частота." />
+                    <TextBlock FontWeight="SemiBold" FontSize="16" Text="Звук заикается на HQ" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
+                               Text="990 кбит/с требуют чистого радиоканала. Включите автоматическое снижение качества или выберите SQ. Wi-Fi 2.4 ГГц рядом с адаптером тоже мешает." />
+                    <TextBlock FontWeight="SemiBold" FontSize="16" Text="Сломается ли гарнитура для звонков?" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
+                               Text="Нет: звонки идут через профиль HFP со своим драйвером (BthHFP). Заменяется только A2DP." />
+                    <TextBlock FontWeight="SemiBold" FontSize="16" Text="Что делает «Загрузите наиболее часто используемые настройки»?" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
+                               Text="Для LDAC: стерео, все частоты 44.1–96 кГц, 16 и 24 бит, качество SQ, адаптивный битрейт включён. Для SBC: стерео, 44.1/48 кГц, Joint Stereo." />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>
