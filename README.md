@@ -8,6 +8,7 @@
 |---|---|
 | `avdtp/` | Ядро протокола на C без кучи и CRT: кадры AVDTP, фрагментация, возможности, LDAC/SBC, автомат источника, медиапакеты. Те же исходники войдут в KMDF-драйвер. |
 | `avdtp/tests/` | Юнит-тесты, симулятор наушников (`sim_sink`, повторяет JBL Live 780NC) и повтор реальной сессии (`test_replay`). |
+| `driver/LdacA2dp/` | KMDF-драйвер профиля A2DP: L2CAP через BRB, ядро AVDTP, IOCTL для службы кодирования, INF для JBL Live 780NC. |
 | `tools/hci/` | Разбор журналов Bluetooth: `btvs` → pcap, ETL → btsnoop, декодер L2CAP/AVDTP/медиа. |
 | `tools/ldacenc/` | WAV → LDAC-пакеты A2DP, симуляция радиоканала и ABR. |
 | `ui/LdacConfig/` | Утилита настроек (WPF, .NET 10, тема Fluent). |
@@ -24,6 +25,12 @@ build.cmd
 
 ```bat
 dotnet build ui\LdacConfig -c Release
+```
+
+Драйвер (нужны WDK/SDK 10.0.28000 и компонент VS «Windows Driver Kit»), результат — `build\LdacA2dp\<Configuration>\LdacA2dp\` (`.sys`, `.inf`, `.cat`, без подписи):
+
+```bat
+build_driver.cmd Debug
 ```
 
 ## ldacenc
@@ -43,5 +50,5 @@ build\ldacenc.exe in.wav --quality hq|sq|mq|abr [--mtu 679] [--raw out.ldac] [--
 - [x] Этап 6 (часть): утилита настроек, формат настроек — `docs/settings-format.md`.
 - [x] Этап 1: эталонная сессия LDAC с JBL Live 780NC через `btvs` — `docs/jbl-live-780nc.md`.
 - [ ] Проверка декодированием: `libldacdec` требует clang (GNU-расширения C); в VS установлены только clang-format/clang-tidy.
-- [ ] Этап 4: KMDF-драйвер (нужен WDK), L2CAP через BRB.
-- [ ] Этап 5: виртуальное аудиоустройство и служба кодирования.
+- [ ] Этап 4: KMDF-драйвер `driver/LdacA2dp` собирается (Code Analysis и InfVerif чистые), на железе не проверен. Есть: исходящие и входящие (сервер PSM 0x19, фильтр по адресу наушников) каналы AVDTP, асинхронное автоподключение при старте, IOCTL для службы с правами чтения/записи и счётчиками пакетов.
+- [ ] Этап 5: звук. Alternative A2DP устроен иначе, чем в нашем плане: `AltA2DP.sys` сам регистрирует KS-интерфейсы Wave/Topology на Bluetooth-устройстве (см. `docs/jbl-live-780nc.md`), без отдельного виртуального устройства.

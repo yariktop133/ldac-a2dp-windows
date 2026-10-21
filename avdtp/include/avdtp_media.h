@@ -6,8 +6,7 @@
 #ifndef AVDTP_MEDIA_H
 #define AVDTP_MEDIA_H
 
-#include <stddef.h>
-#include <stdint.h>
+#include "avdtp_types.h"
 
 #ifdef __cplusplus
 extern "C" {

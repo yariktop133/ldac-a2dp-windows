@@ -7,8 +7,7 @@
 #ifndef AVDTP_H
 #define AVDTP_H
 
-#include <stddef.h>
-#include <stdint.h>
+#include "avdtp_types.h"
 
 #ifdef __cplusplus
 extern "C" {

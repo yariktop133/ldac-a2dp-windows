@@ -1,0 +1,60 @@
+;
+; LdacA2dp.inf - A2DP source profile driver (LDAC / SBC) for selected Bluetooth sinks.
+;
+; Binds by full hardware ID (service UUID + DeviceID VID/PID), which outranks the
+; generic BTHENUM\{0000110b-...} match used by BthA2dp and Alternative A2DP.
+; Test machines only until the driver is signed: requires "bcdedit /set testsigning on".
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Bluetooth
+ClassGuid   = {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Provider    = %ManufacturerName%
+CatalogFile = LdacA2dp.cat
+DriverVer   =
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+LdacA2dp.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = LdacA2dp,NT$ARCH$.10.0...22000
+
+[LdacA2dp.NT$ARCH$.10.0...22000]
+; JBL Live 780NC (DeviceID VID 0x02B0 from the SIG namespace, PID 0x0000)
+%LdacA2dp.DeviceDesc% = LdacA2dp_Device, BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}_VID&000102b0_PID&0000
+
+[LdacA2dp_Device.NT]
+CopyFiles = LdacA2dp_CopyFiles
+
+[LdacA2dp_CopyFiles]
+LdacA2dp.sys
+
+[LdacA2dp_Device.NT.Services]
+AddService = LdacA2dp, 0x00000002, LdacA2dp_Service
+
+[LdacA2dp_Service]
+DisplayName   = %LdacA2dp.SvcDesc%
+ServiceType   = 1               ; SERVICE_KERNEL_DRIVER
+StartType     = 3               ; SERVICE_DEMAND_START
+ErrorControl  = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary = %13%\LdacA2dp.sys
+
+[LdacA2dp_Device.NT.Wdf]
+KmdfService = LdacA2dp, LdacA2dp_wdfsect
+
+[LdacA2dp_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+ManufacturerName     = "LDAC A2DP Project"
+DiskName             = "LDAC A2DP Installation Disk"
+LdacA2dp.DeviceDesc  = "LDAC A2DP Source"
+LdacA2dp.SvcDesc     = "LDAC A2DP Source Profile Driver"
