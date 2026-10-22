@@ -9,6 +9,7 @@
  * Encoding stays in user mode, see docs/stage5-audio-options.md.
  */
 #include "driver.h"
+#include <devpkey.h>
 
 /* {5c9b3c1e-6b07-4d55-9a3a-1d0c43f0a2b1} */
 DEFINE_GUID(LDACA2DP_RENDER_COMPONENT_GUID, 0x5c9b3c1e, 0x6b07, 0x4d55, 0x9a, 0x3a, 0x1d, 0x0c, 0x43, 0xf0, 0xa2, 0xb1);
@@ -205,6 +206,43 @@ VOID AudioFillStatus(_In_ PDEVICE_CONTEXT Ctx, _Inout_ LDACA2DP_STATUS *Out)
     Out->PcmBuffered = Ctx->PcmCount;
     Out->PcmDroppedBytes = Ctx->PcmDroppedBytes;
     WdfSpinLockRelease(Ctx->PcmLock);
+}
+
+/* ---- endpoint name ------------------------------------------------------------- */
+
+/* Windows names the endpoint "<form factor> (<device friendly name>)". The INF
+ * can only give a fixed description, so take the headphones' Bluetooth name,
+ * like the inbox stack and Alternative A2DP show "Headphones (JBL Live 780NC)".
+ * Called before the circuit is added, when the endpoint gets built. */
+VOID AudioNameFromBluetooth(_In_ PDEVICE_CONTEXT Ctx)
+{
+    BTH_DEVICE_INFO info;
+    WDF_MEMORY_DESCRIPTOR out;
+    WDF_DEVICE_PROPERTY_DATA prop;
+    WCHAR name[BTH_MAX_NAME_SIZE];
+    ULONG bytes = 0, len;
+    NTSTATUS status;
+
+    PAGED_CODE();
+    RtlZeroMemory(&info, sizeof(info));
+    WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(&out, &info, sizeof(info));
+    status = WdfIoTargetSendInternalIoctlSynchronously(Ctx->IoTarget, NULL, IOCTL_INTERNAL_BTHENUM_GET_DEVINFO, NULL,
+                                                       &out, NULL, NULL);
+    if (!NT_SUCCESS(status) || !(info.flags & BDIF_NAME))
+        return;
+    info.name[BTH_MAX_NAME_SIZE - 1] = 0;
+    len = (ULONG)strnlen(info.name, BTH_MAX_NAME_SIZE);
+    if (len == 0)
+        return;
+    status = RtlUTF8ToUnicodeN(name, sizeof(name) - sizeof(WCHAR), &bytes, info.name, len);
+    if (!NT_SUCCESS(status) || bytes == 0)
+        return;
+    name[bytes / sizeof(WCHAR)] = 0;
+
+    WDF_DEVICE_PROPERTY_DATA_INIT(&prop, &DEVPKEY_Device_FriendlyName);
+    prop.Flags = PLUGPLAY_PROPERTY_PERSISTENT;
+    prop.Lcid = LOCALE_NEUTRAL;
+    (VOID)WdfDeviceAssignProperty(Ctx->Device, &prop, DEVPROP_TYPE_STRING, bytes + sizeof(WCHAR), name);
 }
 
 /* ---- circuit ------------------------------------------------------------------ */

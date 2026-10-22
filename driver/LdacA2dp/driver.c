@@ -120,6 +120,7 @@ NTSTATUS LdacA2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw
     status = L2capInitialize(ctx);
     if (!NT_SUCCESS(status))
         return status;
+    AudioNameFromBluetooth(ctx); /* before the endpoint gets built */
     return AcxDeviceAddCircuit(Device, ctx->Render);
 }
 

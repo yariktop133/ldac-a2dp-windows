@@ -147,6 +147,7 @@ VOID L2capStartSignalReader(_In_ PDEVICE_CONTEXT Ctx);
 /* audio.c */
 #define LDACA2DP_PCM_RING_SIZE (256 * 1024) /* ~330 ms at 96 kHz / 32-bit stereo */
 _IRQL_requires_(PASSIVE_LEVEL) NTSTATUS AudioCreate(_In_ PDEVICE_CONTEXT Ctx);
+_IRQL_requires_(PASSIVE_LEVEL) VOID AudioNameFromBluetooth(_In_ PDEVICE_CONTEXT Ctx);
 VOID AudioReadPcm(_In_ PDEVICE_CONTEXT Ctx, _In_ WDFREQUEST Request);
 VOID AudioFillStatus(_In_ PDEVICE_CONTEXT Ctx, _Inout_ LDACA2DP_STATUS *Out);
 EVT_WDF_DEVICE_RELEASE_HARDWARE LdacA2dpEvtReleaseHardware;
