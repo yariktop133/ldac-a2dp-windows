@@ -159,6 +159,8 @@ public:
 std::unique_ptr<MediaSink> MakeDriverSink(uint64_t address);
 // AVDTP state (avdtp_src_state) of the LdacA2dp device, -1 if there is none.
 int DriverLinkState(uint64_t address);
+// `ldacsvc status`: the driver's view, for the test stand.
+int DriverPrintStatus(uint64_t address);
 // Simulated radio link: capacity in kbit/s over time ("0:1500,5:400").
 std::unique_ptr<MediaSink> MakeNullSink(const std::string &linkSpec);
 

@@ -166,7 +166,7 @@ NTSTATUS L2capOpenChannel(_In_ PL2CAP_CHANNEL Channel)
 
     ctx->ProfileInterface.BthInitializeBrb((PBRB)brb, BRB_L2CA_OPEN_CHANNEL);
     FillChannelConfig(Channel, brb);
-    brb->Psm = AVDTP_PSM;
+    brb->Psm = ctx->Psm;
 
     status = SendBrbAsync(ctx, Channel->OpenRequest, brb, OpenCompletion, Channel);
     if (status != STATUS_PENDING) {
@@ -247,8 +247,8 @@ static VOID AcceptIncoming(_In_ PDEVICE_CONTEXT Ctx, _In_ PINDICATION_PARAMETERS
     WdfSpinLockAcquire(Ctx->Lock);
     if (!Ctx->Sig.Open && !Ctx->Sig.Opening && !Ctx->Sig.Handle)
         channel = &Ctx->Sig;
-    else if (Ctx->Sig.Open && !Ctx->Media.Open && !Ctx->Media.Opening && !Ctx->Media.Handle)
-        channel = &Ctx->Media;
+    else if (Ctx->Role == RoleA2dp && Ctx->Sig.Open && !Ctx->Media.Open && !Ctx->Media.Opening && !Ctx->Media.Handle)
+        channel = &Ctx->Media; /* AVCTP has a single channel */
     if (channel) {
         channel->Opening = TRUE;
         channel->Incoming = TRUE;
@@ -291,18 +291,18 @@ NTSTATUS L2capRegisterServer(_In_ PDEVICE_CONTEXT Ctx)
     struct _BRB_L2CA_REGISTER_SERVER reg;
     NTSTATUS status;
 
-    /* PSM 0x19 is a fixed PSM that other profile drivers (BthA2dp for other
-     * sinks) may already hold; a failure here is expected and harmless, the
+    /* PSM 0x19 / 0x17 is a fixed PSM that other profile drivers (BthA2dp,
+     * AvrcpTransport for other devices) may already hold; a failure here is expected and harmless, the
      * address-filtered server registration below is what matters. */
     RtlZeroMemory(&psm, sizeof(psm));
     Ctx->ProfileInterface.BthInitializeBrb((PBRB)&psm, BRB_REGISTER_PSM);
-    psm.Psm = AVDTP_PSM;
+    psm.Psm = Ctx->Psm;
     Ctx->PsmRegistered = NT_SUCCESS(SendBrbSync(Ctx, &psm));
 
     RtlZeroMemory(&reg, sizeof(reg));
     Ctx->ProfileInterface.BthInitializeBrb((PBRB)&reg, BRB_L2CA_REGISTER_SERVER);
     reg.BtAddress = Ctx->RemoteAddress;
-    reg.PSM = AVDTP_PSM;
+    reg.PSM = Ctx->Psm;
     reg.IndicationFlags = 0;
     reg.IndicationCallback = ServerIndication;
     reg.IndicationCallbackContext = Ctx;
@@ -321,7 +321,7 @@ VOID L2capUnregisterServer(_In_ PDEVICE_CONTEXT Ctx)
         RtlZeroMemory(&brb, sizeof(brb));
         Ctx->ProfileInterface.BthInitializeBrb((PBRB)&brb, BRB_L2CA_UNREGISTER_SERVER);
         brb.BtAddress = Ctx->RemoteAddress;
-        brb.Psm = AVDTP_PSM;
+        brb.Psm = Ctx->Psm;
         brb.ServerHandle = Ctx->ServerHandle;
         (VOID)SendBrbSync(Ctx, &brb);
         Ctx->ServerHandle = NULL;
@@ -330,7 +330,7 @@ VOID L2capUnregisterServer(_In_ PDEVICE_CONTEXT Ctx)
         struct _BRB_PSM brb;
         RtlZeroMemory(&brb, sizeof(brb));
         Ctx->ProfileInterface.BthInitializeBrb((PBRB)&brb, BRB_UNREGISTER_PSM);
-        brb.Psm = AVDTP_PSM;
+        brb.Psm = Ctx->Psm;
         (VOID)SendBrbSync(Ctx, &brb);
         Ctx->PsmRegistered = FALSE;
     }

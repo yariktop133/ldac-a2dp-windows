@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <thread>
 
@@ -351,6 +352,22 @@ public:
                 GetOverlappedResult(handle_, &ov, &n, FALSE);
             CloseHandle(ov.hEvent);
             open_ = ok && n == sizeof(st) && st.PcmOpen;
+            if (ok && n == sizeof(st)) {
+                // The endpoint has a hardware volume control, so Windows no
+                // longer scales the PCM: the headphones do (AVRCP absolute
+                // volume) or, without it, we do.
+                float g = st.AbsoluteVolume ? 1.0f
+                        : st.Muted ? 0.0f
+                                   : (float)std::pow(10.0, st.VolumeLevel / 65536.0 / 20.0);
+                targetGain_ = g;
+                int abs = st.AbsoluteVolume ? 1 : 0;
+                if (abs != absVolume_) {
+                    absVolume_ = abs;
+                    printf("volume: %s, endpoint %.1f dB%s\n", abs ? "absolute (the headphones apply it, AVRCP)" : "applied here",
+                           st.VolumeLevel / 65536.0, st.Muted ? " muted" : "");
+                    fflush(stdout);
+                }
+            }
         }
         return open_;
     }
@@ -412,6 +429,21 @@ private:
         const uint8_t *p = buffer_.data() + sizeof(*h);
         size_t samples = h->Bytes / (h->BitsPerSample / 8);
         size_t base = out.size();
+        struct ApplyGain {  // after conversion, ramped over the block (no zipper noise)
+            EndpointSource *self;
+            std::vector<float> &out;
+            size_t base;
+            ~ApplyGain()
+            {
+                size_t n = out.size() - base;
+                float from = self->gain_, to = self->targetGain_;
+                if (from == 1.0f && to == 1.0f)
+                    return;
+                for (size_t i = 0; i < n; i++)
+                    out[base + i] *= from + (to - from) * (float)(i / 2) / (float)(n / 2 ? n / 2 : 1);
+                self->gain_ = to;
+            }
+        } applyGain{ this, out, base };
         out.resize(base + samples);
         if (h->Flags & LDACA2DP_PCM_FLOAT) {
             memcpy(out.data() + base, p, samples * sizeof(float));
@@ -441,6 +473,8 @@ private:
     std::vector<uint8_t> buffer_;
     bool open_ = false;
     Clock::time_point nextOpenPoll_{};
+    float gain_ = 1.0f, targetGain_ = 1.0f;
+    int absVolume_ = -1;
 };
 
 // ---- simulated link (no driver, no radio) ------------------------------------
@@ -543,6 +577,28 @@ private:
 std::unique_ptr<MediaSink> MakeDriverSink(uint64_t address)
 {
     return std::make_unique<DriverSink>(address);
+}
+
+int DriverPrintStatus(uint64_t address)
+{
+    static const char *avrcp[] = { "no AVRCP device", "AVCTP closed", "AVCTP opening", "connected",
+                                   "absolute volume", "connected, no absolute volume" };
+    DriverSink probe(address);
+    LDACA2DP_STATUS st;
+    if (!probe.Probe(st))
+        return fprintf(stderr, "no LdacA2dp device\n"), 1;
+    printf("headphones   %s\n", FormatAddress(st.RemoteAddress).c_str());
+    printf("AVDTP state  %u, codec %u, %u Hz, MTU %u, delay %.1f ms, last error 0x%08X\n", st.AvdtpState, st.Codec,
+           st.SampleRate, st.MediaMtu, st.DelayReport100us / 10.0, (unsigned)st.LastError);
+    printf("media        %llu sent, %llu failed, %u in flight\n", st.MediaPacketsSent, st.MediaPacketsFailed,
+           st.MediaInFlight);
+    printf("endpoint     %u Hz %u-bit, %s%s, %u bytes buffered, %llu dropped\n", st.PcmSampleRate, st.PcmBitsPerSample,
+           st.PcmOpen ? "open" : "closed", st.PcmRunning ? " running" : "", st.PcmBuffered, st.PcmDroppedBytes);
+    printf("volume       %.1f dB%s, %s\n", st.VolumeLevel / 65536.0, st.Muted ? " muted" : "",
+           st.AbsoluteVolume ? "applied by the headphones" : "applied by the service");
+    printf("AVRCP        %s, last error 0x%08X\n", st.AvrcpState < 6 ? avrcp[st.AvrcpState] : "?",
+           (unsigned)st.AvrcpLastError);
+    return 0;
 }
 
 int DriverLinkState(uint64_t address)

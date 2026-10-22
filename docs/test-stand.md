@@ -25,6 +25,8 @@
 tools/stand/run-admin.sh script.ps1 [секунд ожидания]   # копирует как admin.ps1, запускает, печатает вывод
 ```
 
+`ldacsvc status` печатает состояние драйвера: AVDTP, медиапакеты, конечную точку, громкость и AVRCP (с кодом ошибки последнего открытия AVCTP). `tools/stand/set-volume.ps1 <проценты>` ставит громкость конечной точки по умолчанию. `tools/stand/keylog.ps1` пишет медиаклавиши в `C:\stand\keys.log`; его нужно запускать в сеансе пользователя (`schtasks /it`), а не через `guestcontrol`.
+
 `tools/stand/stand-status.ps1` в госте показывает файлы стенда, состояние `LdacSvc`, устройство `LdacA2dp` и хвост журнала службы.
 
 У ВМ нет своей звуковой карты. С драйвером этапа 5 в ней есть конечная точка «Наушники (LDAC A2DP Source)», и звук для проверки проще всего подать в неё: `(New-Object Media.SoundPlayer 'C:/stand/beeps.wav').PlaySync()` через `guestcontrol`. `captures/beeps.wav` — 20 с нот на −12 дБ; `tone.wav` слишком тихий (−46 дБ).

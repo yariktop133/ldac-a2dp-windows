@@ -53,6 +53,17 @@
 - Ждать DELAYREPORT между SET_CONFIGURATION и OPEN — наушники присылают его, не дожидаясь ответа на OPEN.
 - START/SUSPEND по наличию звука, а не сразу после OPEN (`auto_start` в `avdtp_source` — для тестов).
 
+## AVRCP (AVCTP, PSM 0x17) в той же записи
+
+Windows (штатный `AvrcpTransport`) ↔ JBL, разбор `tools/hci/avdtp_dump.py`:
+
+- **Кто открывает канал.** В первом подключении AVCTP открыл компьютер. При повторной настройке A2DP наушники сами закрыли AVCTP, а когда медиаканал снова открылся, сами открыли его заново.
+- **Возможности (CT).** Windows запрашивает `GetCapabilities(EVENTS)`, наушники отвечают `BATT_STATUS`, `VOLUME_CHANGED`. Windows подписывается на `VOLUME_CHANGED`, получает `INTERIM volume=71` (из 127), а после каждого `CHANGED` подписывается снова.
+- **Запросы наушников (TG).** Наушники спрашивают возможности Windows, подписываются на `PLAYBACK_STATUS` и `TRACK_CHANGED` и запрашивают `GetElementAttributes`, то есть название и исполнителя трека.
+- **Кнопки** приходят командами `PASS THROUGH`.
+
+Наш ответ на `PLAYBACK_STATUS` и `TRACK_CHANGED` побайтово совпадает с ответом Windows (тест `avdtp/tests/test_avrcp.c`). Метаданные мы не отдаём: возвращаем 0 атрибутов.
+
 ## Наблюдения о стеке Windows
 
 - Перезапуск радио Bluetooth через `Windows.Devices.Radios` удалил дочерние устройства JBL (A2DP/HFP/AVRCP) и не пересоздал их: наушники подключались и через 17 с уходили (`Remote User Terminated`). Помог `pnputil /restart-device` адаптера.

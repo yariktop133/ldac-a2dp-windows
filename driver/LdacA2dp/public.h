@@ -73,6 +73,12 @@ typedef struct _LDACA2DP_STATUS {
     UINT8 Reserved2[2];
     UINT32 PcmBuffered;       /* bytes waiting for READ_PCM */
     UINT64 PcmDroppedBytes;   /* overwritten before anyone read them */
+    INT32 VolumeLevel;        /* endpoint volume, 1/65536 dB (-63.5..0 dB) */
+    UINT8 Muted;
+    UINT8 AbsoluteVolume;     /* the headphones apply the volume (AVRCP); else the service must */
+    UINT8 AvrcpState;         /* LDACA2DP_AVRCP_*: the AVRCP device of the same headphones */
+    UINT8 Reserved3;
+    INT32 AvrcpLastError;     /* NTSTATUS of the last failed AVCTP channel open */
 } LDACA2DP_STATUS;
 
 /*
@@ -93,5 +99,12 @@ typedef struct _LDACA2DP_PCM_HEADER {
     UINT16 Flags;
     UINT32 Bytes;             /* PCM bytes after the header */
 } LDACA2DP_PCM_HEADER;
+
+#define LDACA2DP_AVRCP_NO_DEVICE   0 /* no AVRCP devnode bound to LdacA2dp for these headphones */
+#define LDACA2DP_AVRCP_CLOSED      1 /* no AVCTP channel */
+#define LDACA2DP_AVRCP_OPENING     2
+#define LDACA2DP_AVRCP_CONNECTED   3 /* capabilities not known yet */
+#define LDACA2DP_AVRCP_ABS_VOLUME  4 /* absolute volume in use */
+#define LDACA2DP_AVRCP_NO_ABS      5 /* connected, the headphones have no absolute volume */
 
 #endif /* LDACA2DP_PUBLIC_H */

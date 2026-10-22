@@ -30,5 +30,6 @@ void test_msg(void);
 void test_codec(void);
 void test_loopback(void);
 void test_replay(void);
+void test_avrcp(void);
 
 #endif

@@ -57,7 +57,8 @@ add_library(avdtp STATIC
     avdtp/src/avdtp_msg.c
     avdtp/src/a2dp_codec.c
     avdtp/src/avdtp_source.c
-    avdtp/src/avdtp_media.c)
+    avdtp/src/avdtp_media.c
+    avdtp/src/avrcp.c)
 target_include_directories(avdtp PUBLIC avdtp/include)
 if(MSVC)
     target_compile_options(avdtp PRIVATE /W4 /WX)
@@ -92,6 +93,7 @@ add_executable(avdtp_tests
     avdtp/tests/test_codec.c
     avdtp/tests/test_loopback.c
     avdtp/tests/test_replay.c
+    avdtp/tests/test_avrcp.c
     avdtp/tests/sim_sink.c)
 target_link_libraries(avdtp_tests PRIVATE avdtp)
 add_test(NAME avdtp_tests COMMAND avdtp_tests)

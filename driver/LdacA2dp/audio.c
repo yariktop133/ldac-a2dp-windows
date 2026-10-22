@@ -93,6 +93,7 @@ static VOID PcmSetFormat(_In_ PDEVICE_CONTEXT Ctx, _In_ ACXDATAFORMAT Format, _I
     }
     Ctx->PcmRunning = Running;
     WdfSpinLockRelease(Ctx->PcmLock);
+    PeerSetPlaying(Ctx, Running);
 }
 
 static VOID PcmSetRunning(_In_ PDEVICE_CONTEXT Ctx, _In_ BOOLEAN Running)
@@ -100,6 +101,7 @@ static VOID PcmSetRunning(_In_ PDEVICE_CONTEXT Ctx, _In_ BOOLEAN Running)
     WdfSpinLockAcquire(Ctx->PcmLock);
     Ctx->PcmRunning = Running;
     WdfSpinLockRelease(Ctx->PcmLock);
+    PeerSetPlaying(Ctx, Running); /* AVRCP PLAYBACK_STATUS: the headphones' play/pause button */
 }
 
 /* Fill one waiting READ_PCM from the ring. Called with PcmLock held. */
@@ -206,6 +208,151 @@ VOID AudioFillStatus(_In_ PDEVICE_CONTEXT Ctx, _Inout_ LDACA2DP_STATUS *Out)
     Out->PcmBuffered = Ctx->PcmCount;
     Out->PcmDroppedBytes = Ctx->PcmDroppedBytes;
     WdfSpinLockRelease(Ctx->PcmLock);
+    Out->VolumeLevel = Ctx->VolumeLevel;
+    Out->Muted = Ctx->Muted != 0;
+    Out->AbsoluteVolume = PeerAbsoluteVolume(Ctx);
+    {
+        LONG err;
+        Out->AvrcpState = PeerAvrcpState(Ctx, &err);
+        Out->AvrcpLastError = err;
+    }
+}
+
+/* ---- volume: Windows' endpoint volume <-> AVRCP absolute volume ----------------- */
+
+/* The volume element spans -63.5..0 dB in 0.5 dB steps. With a hardware
+ * volume element the audio engine no longer scales the PCM; the headphones do
+ * (AVRCP absolute volume), or the service when they have none.
+ *
+ * Windows maps its slider onto that range with an audio taper (roughly
+ * 34 dB per decade); AVRCP volume is linear in the slider position, as the
+ * inbox stack and phones do it. Measured on the stand with
+ * IAudioEndpointVolume::SetMasterVolumeLevelScalar (tools/stand/set-volume.ps1):
+ * slider percent -> dB x10. */
+static const struct { SHORT Percent, Db10; } g_Taper[] = {
+    { 0, -635 }, { 1, -560 }, { 2, -509 }, { 5, -416 }, { 10, -330 }, { 15, -276 }, { 20, -236 }, { 25, -204 },
+    { 30, -178 }, { 35, -155 }, { 40, -136 }, { 45, -119 }, { 50, -103 }, { 55, -89 }, { 60, -76 }, { 65, -64 },
+    { 70, -53 }, { 75, -43 }, { 80, -33 }, { 85, -24 }, { 90, -16 }, { 95, -8 }, { 100, 0 },
+};
+
+/* slider position in 1/1000 percent for a level in 1/65536 dB */
+static LONG TaperLevelToMilliPercent(_In_ LONG Level)
+{
+    LONG db1000 = (LONG)(((LONGLONG)Level * 1000) / 65536); /* dB x1000 */
+    ULONG i;
+
+    if (db1000 <= g_Taper[0].Db10 * 100)
+        return 0;
+    for (i = 1; i < RTL_NUMBER_OF(g_Taper); i++) {
+        LONG d0 = g_Taper[i - 1].Db10 * 100, d1 = g_Taper[i].Db10 * 100;
+        if (db1000 <= d1) {
+            LONG p0 = g_Taper[i - 1].Percent * 1000, p1 = g_Taper[i].Percent * 1000;
+            return p0 + (LONG)((LONGLONG)(db1000 - d0) * (p1 - p0) / (d1 - d0));
+        }
+    }
+    return 100000;
+}
+
+/* level in 1/65536 dB for a slider position in 1/1000 percent */
+static LONG TaperMilliPercentToLevel(_In_ LONG MilliPercent)
+{
+    ULONG i;
+
+    if (MilliPercent <= 0)
+        return LDACA2DP_VOLUME_MIN;
+    for (i = 1; i < RTL_NUMBER_OF(g_Taper); i++) {
+        LONG p0 = g_Taper[i - 1].Percent * 1000, p1 = g_Taper[i].Percent * 1000;
+        if (MilliPercent <= p1) {
+            LONG d0 = g_Taper[i - 1].Db10 * 100, d1 = g_Taper[i].Db10 * 100;
+            LONG db1000 = d0 + (LONG)((LONGLONG)(MilliPercent - p0) * (d1 - d0) / (p1 - p0));
+            return (LONG)((LONGLONG)db1000 * 65536 / 1000);
+        }
+    }
+    return 0;
+}
+
+UCHAR AudioLevelToAvrcp(_In_ LONG Level, _In_ ULONG Muted)
+{
+    LONG v;
+
+    if (Muted)
+        return 0;
+    v = (TaperLevelToMilliPercent(Level) * AVRCP_VOLUME_MAX + 50000) / 100000;
+    return (UCHAR)(v < 0 ? 0 : v > AVRCP_VOLUME_MAX ? AVRCP_VOLUME_MAX : v);
+}
+
+LONG AudioAvrcpToLevel(_In_ UCHAR Volume)
+{
+    LONG level = TaperMilliPercentToLevel(((LONG)(Volume & AVRCP_VOLUME_MAX) * 100000 + AVRCP_VOLUME_MAX / 2) /
+                                          AVRCP_VOLUME_MAX);
+
+    return level > 0 ? 0 : level; /* not snapped to 0.5 dB: near 0 dB a step is ~3 % of the slider */
+}
+
+static PDEVICE_CONTEXT ElementDevice(_In_ ACXELEMENT Element)
+{
+    return GetCircuitContext((ACXCIRCUIT)AcxElementGetContainer(Element))->Dev;
+}
+
+static NTSTATUS AudioEvtVolumeAssign(_In_ ACXVOLUME Volume, _In_ ULONG Channel, _In_ LONG Level)
+{
+    PDEVICE_CONTEXT ctx = ElementDevice((ACXELEMENT)Volume);
+
+    UNREFERENCED_PARAMETER(Channel); /* one level for both channels */
+    PAGED_CODE();
+    Level = Level < LDACA2DP_VOLUME_MIN ? LDACA2DP_VOLUME_MIN : Level > 0 ? 0 : Level;
+    if (Level == ctx->VolumeLevel)
+        return STATUS_SUCCESS; /* unchanged, e.g. Windows echoing a level the headphones reported */
+    ctx->VolumeLevel = Level;
+    PeerSendVolume(ctx, AudioLevelToAvrcp(ctx->VolumeLevel, ctx->Muted));
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS AudioEvtRampedVolumeAssign(_In_ ACXVOLUME Volume, _In_ ULONG Channel, _In_ LONG Level,
+                                           _In_ ACX_VOLUME_CURVE_TYPE CurveType, _In_ ULONGLONG CurveDuration)
+{
+    UNREFERENCED_PARAMETER(CurveType);
+    UNREFERENCED_PARAMETER(CurveDuration);
+    return AudioEvtVolumeAssign(Volume, Channel, Level);
+}
+
+static NTSTATUS AudioEvtVolumeRetrieve(_In_ ACXVOLUME Volume, _In_ ULONG Channel, _Out_ LONG *Level)
+{
+    UNREFERENCED_PARAMETER(Channel);
+    PAGED_CODE();
+    *Level = ElementDevice((ACXELEMENT)Volume)->VolumeLevel;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS AudioEvtMuteAssign(_In_ ACXMUTE Mute, _In_ ULONG Channel, _In_ ULONG State)
+{
+    PDEVICE_CONTEXT ctx = ElementDevice((ACXELEMENT)Mute);
+
+    UNREFERENCED_PARAMETER(Channel);
+    PAGED_CODE();
+    ctx->Muted = State != 0;
+    PeerSendVolume(ctx, AudioLevelToAvrcp(ctx->VolumeLevel, ctx->Muted));
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS AudioEvtMuteRetrieve(_In_ ACXMUTE Mute, _In_ ULONG Channel, _Out_ ULONG *State)
+{
+    UNREFERENCED_PARAMETER(Channel);
+    PAGED_CODE();
+    *State = ElementDevice((ACXELEMENT)Mute)->Muted;
+    return STATUS_SUCCESS;
+}
+
+/* The headphones changed their volume (AVRCP): move Windows' slider. */
+VOID AudioEvtVolumeWorkItem(_In_ WDFWORKITEM WorkItem)
+{
+    PDEVICE_CONTEXT ctx = GetDeviceContext(WdfWorkItemGetParentObject(WorkItem));
+    LONG v = InterlockedExchange(&ctx->RemoteVolume, -1);
+
+    if (v < 0 || !ctx->VolumeElement)
+        return;
+    ctx->VolumeLevel = AudioAvrcpToLevel((UCHAR)v);
+    AcxVolumeChangeLevelNotification(ctx->VolumeElement);
 }
 
 /* ---- endpoint name ------------------------------------------------------------- */
@@ -294,6 +441,12 @@ NTSTATUS AudioCreate(_In_ PDEVICE_CONTEXT Ctx)
     ACXDATAFORMATLIST formats;
     WDF_IO_QUEUE_CONFIG queueConfig;
     WDFMEMORY ringMemory;
+    WDF_WORKITEM_CONFIG workConfig;
+    ACX_VOLUME_CALLBACKS volumeCallbacks;
+    ACX_VOLUME_CONFIG volumeConfig;
+    ACX_MUTE_CALLBACKS muteCallbacks;
+    ACX_MUTE_CONFIG muteConfig;
+    ACXELEMENT elements[2];
     ACXCIRCUIT circuit;
     NTSTATUS status;
 
@@ -315,6 +468,13 @@ NTSTATUS AudioCreate(_In_ PDEVICE_CONTEXT Ctx)
     status = WdfIoQueueCreate(device, &queueConfig, WDF_NO_OBJECT_ATTRIBUTES, &Ctx->PcmReadQueue);
     if (!NT_SUCCESS(status))
         return status;
+    WDF_WORKITEM_CONFIG_INIT(&workConfig, AudioEvtVolumeWorkItem);
+    WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+    attributes.ParentObject = device;
+    status = WdfWorkItemCreate(&workConfig, &attributes, &Ctx->VolumeWorkItem);
+    if (!NT_SUCCESS(status))
+        return status;
+    Ctx->VolumeLevel = AudioAvrcpToLevel(100); /* until the headphones report theirs */
 
     init = AcxCircuitInitAllocate(device);
     if (!init)
@@ -335,8 +495,42 @@ NTSTATUS AudioCreate(_In_ PDEVICE_CONTEXT Ctx)
         return status;
     GetCircuitContext(circuit)->Dev = Ctx;
 
-    /* host pin: where the audio engine writes; no volume/mute elements, so
-     * Windows applies software volume (AVRCP absolute volume comes later) */
+    /* hardware volume and mute: Windows stops scaling the PCM; the level goes
+     * to the headphones as AVRCP absolute volume */
+    ACX_VOLUME_CALLBACKS_INIT(&volumeCallbacks);
+    volumeCallbacks.EvtAcxRampedVolumeAssignLevel = AudioEvtRampedVolumeAssign;
+    volumeCallbacks.EvtAcxVolumeRetrieveLevel = AudioEvtVolumeRetrieve;
+    ACX_VOLUME_CONFIG_INIT(&volumeConfig);
+    volumeConfig.ChannelsCount = 2;
+    volumeConfig.Minimum = LDACA2DP_VOLUME_MIN;
+    volumeConfig.Maximum = 0;
+    volumeConfig.SteppingDelta = 32768; /* 0.5 dB */
+    volumeConfig.Name = &KSAUDFNAME_VOLUME_CONTROL;
+    volumeConfig.Callbacks = &volumeCallbacks;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+    attributes.ParentObject = circuit;
+    status = AcxVolumeCreate(circuit, &attributes, &volumeConfig, &Ctx->VolumeElement);
+    if (!NT_SUCCESS(status))
+        return status;
+    ACX_MUTE_CALLBACKS_INIT(&muteCallbacks);
+    muteCallbacks.EvtAcxMuteAssignState = AudioEvtMuteAssign;
+    muteCallbacks.EvtAcxMuteRetrieveState = AudioEvtMuteRetrieve;
+    ACX_MUTE_CONFIG_INIT(&muteConfig);
+    muteConfig.ChannelsCount = 2;
+    muteConfig.Name = &KSAUDFNAME_WAVE_MUTE;
+    muteConfig.Callbacks = &muteCallbacks;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+    attributes.ParentObject = circuit;
+    status = AcxMuteCreate(circuit, &attributes, &muteConfig, &Ctx->MuteElement);
+    if (!NT_SUCCESS(status))
+        return status;
+    elements[0] = (ACXELEMENT)Ctx->VolumeElement;
+    elements[1] = (ACXELEMENT)Ctx->MuteElement;
+    status = AcxCircuitAddElements(circuit, elements, RTL_NUMBER_OF(elements));
+    if (!NT_SUCCESS(status))
+        return status;
+
+    /* host pin: where the audio engine writes */
     ACX_PIN_CONFIG_INIT(&pinCfg);
     pinCfg.Type = AcxPinTypeSink;
     pinCfg.Communication = AcxPinCommunicationSink;

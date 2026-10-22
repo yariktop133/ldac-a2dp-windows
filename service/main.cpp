@@ -39,7 +39,8 @@ static void Usage()
             "usage: ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source endpoint|loopback[:name]|wav:file]\n"
             "               [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]\n"
             "       ldacsvc install [--address ...] [--source ...]\n"
-            "       ldacsvc uninstall\n");
+            "       ldacsvc uninstall\n"
+            "       ldacsvc status [AA:BB:CC:DD:EE:FF]\n");
 }
 
 int main(int argc, char **argv)
@@ -52,6 +53,8 @@ int main(int argc, char **argv)
         first = 2;
     if (command == "uninstall")
         return argc == 2 ? ServiceUninstall() : (Usage(), 2);
+    if (command == "status")
+        return DriverPrintStatus(argc > 2 ? ParseAddress(argv[2]) : 0);
 
     std::string passThrough;  // for install: the session options, re-quoted
     for (int i = first; i < argc; i++) {

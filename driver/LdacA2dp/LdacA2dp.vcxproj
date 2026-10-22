@@ -58,7 +58,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR)\acxstub.lib;ksguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR)\acxstub.lib;ksguid.lib;vhfkm.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Inf>
       <!-- grows with every build, so pnputil replaces an installed test build of the same day -->
@@ -78,11 +78,13 @@
     <ClCompile Include="avdtp_glue.c" />
     <ClCompile Include="ioctl.c" />
     <ClCompile Include="audio.c" />
+    <ClCompile Include="avrcp_glue.c" />
     <!-- shared AVDTP / A2DP core, the same sources the user-mode tests exercise -->
     <ClCompile Include="..\..\avdtp\src\avdtp_msg.c" />
     <ClCompile Include="..\..\avdtp\src\a2dp_codec.c" />
     <ClCompile Include="..\..\avdtp\src\avdtp_source.c" />
     <ClCompile Include="..\..\avdtp\src\avdtp_media.c" />
+    <ClCompile Include="..\..\avdtp\src\avrcp.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="driver.h" />

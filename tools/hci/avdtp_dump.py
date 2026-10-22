@@ -134,6 +134,64 @@ def avdtp_signal(t, arrow, pdu):
     print(s)
 
 
+AVC_CTYPE = {0: 'CONTROL', 1: 'STATUS', 3: 'NOTIFY', 8: 'NOT_IMPLEMENTED', 9: 'ACCEPTED', 10: 'REJECTED',
+             12: 'STABLE', 13: 'CHANGED', 15: 'INTERIM'}
+AVRCP_PDU = {0x10: 'GetCapabilities', 0x11: 'ListPlayerAppSettingAttributes', 0x17: 'InformDisplayableCharacterSet',
+             0x18: 'InformBatteryStatus', 0x20: 'GetElementAttributes', 0x30: 'GetPlayStatus',
+             0x31: 'RegisterNotification', 0x40: 'RequestContinuingResponse', 0x41: 'AbortContinuingResponse',
+             0x50: 'SetAbsoluteVolume', 0x60: 'SetAddressedPlayer', 0x74: 'PlayItem'}
+AVRCP_EVENT = {1: 'PLAYBACK_STATUS', 2: 'TRACK_CHANGED', 3: 'TRACK_END', 4: 'TRACK_START', 5: 'PLAYBACK_POS',
+               6: 'BATT_STATUS', 7: 'SYSTEM_STATUS', 8: 'PLAYER_APP_SETTING', 9: 'NOW_PLAYING_CONTENT',
+               10: 'AVAILABLE_PLAYERS', 11: 'ADDRESSED_PLAYER', 12: 'UIDS', 13: 'VOLUME_CHANGED'}
+PASSTHROUGH = {0x41: 'VOLUME_UP', 0x42: 'VOLUME_DOWN', 0x43: 'MUTE', 0x44: 'PLAY', 0x45: 'STOP', 0x46: 'PAUSE',
+               0x48: 'REWIND', 0x49: 'FAST_FORWARD', 0x4B: 'FORWARD', 0x4C: 'BACKWARD'}
+
+
+def avctp(t, arrow, pdu):
+    label, ptype, cr, ipid = pdu[0] >> 4, (pdu[0] >> 2) & 3, (pdu[0] >> 1) & 1, pdu[0] & 1
+    s = f'{t:9.3f} {arrow} AVCTP {"RSP" if cr else "CMD"} label={label}'
+    if ptype != 0:
+        print(s + f' fragment type={ptype} {pdu.hex()}')
+        return
+    pid = pdu[1] << 8 | pdu[2]
+    if ipid:
+        print(s + f' invalid PID 0x{pid:04x}')
+        return
+    av = pdu[3:]
+    if len(av) < 3:
+        print(s + ' ' + av.hex())
+        return
+    ctype, opcode, body = av[0] & 0x0F, av[2], av[3:]
+    s += f' {AVC_CTYPE.get(ctype, ctype)}'
+    if opcode == 0x7C and body:
+        op, released = body[0] & 0x7F, body[0] >> 7
+        s += f' PASS_THROUGH {PASSTHROUGH.get(op, hex(op))} {"released" if released else "pressed"}'
+    elif opcode == 0x00 and len(body) >= 7:
+        pdu_id, plen, params = body[3], body[5] << 8 | body[6], body[7:]
+        s += f' {AVRCP_PDU.get(pdu_id, hex(pdu_id))}'
+        if pdu_id == 0x10 and params:
+            s += f' cap={params[0]}'
+            if len(params) > 2 and params[0] == 3:
+                s += ' events=' + ','.join(AVRCP_EVENT.get(e, str(e)) for e in params[2:2 + params[1]])
+            elif len(params) > 2:
+                s += ' ' + params[2:].hex()
+        elif pdu_id == 0x31 and params:
+            s += f' {AVRCP_EVENT.get(params[0], params[0])}'
+            if params[0] == 13 and len(params) > 1 and ctype in (13, 15):
+                s += f' volume={params[1] & 0x7F}'
+            elif len(params) > 1:
+                s += ' ' + params[1:].hex()
+        elif pdu_id == 0x50 and params:
+            s += f' volume={params[0] & 0x7F}'
+        elif params:
+            s += ' ' + params[:24].hex()
+    elif opcode in (0x30, 0x31):
+        s += f' {"UNIT_INFO" if opcode == 0x30 else "SUBUNIT_INFO"} {body.hex()}'
+    else:
+        s += f' opcode=0x{opcode:02x} {body.hex()}'
+    print(s)
+
+
 def main(path, show_media=False):
     acl = {}          # (handle, sent) -> reassembly buffer
     chans = {}        # cid -> psm
@@ -169,6 +227,9 @@ def main(path, show_media=False):
 
         if cid == 1:
             l2cap_signal(t, arrow, handle, pdu, pending, chans, avdtp_pairs)
+            continue
+        if chans.get(cid) == 0x17 and pdu:
+            avctp(t, arrow, pdu)
             continue
         if chans.get(cid) != 0x19 or not pdu:
             continue

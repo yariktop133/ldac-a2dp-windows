@@ -32,6 +32,10 @@ LdacA2dp.sys = 1,,
 [LdacA2dp.NT$ARCH$.10.0...22621]
 ; JBL Live 780NC (DeviceID VID 0x02B0 from the SIG namespace, PID 0x0000)
 %LdacA2dp.DeviceDesc% = LdacA2dp_Device, BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}_VID&000102b0_PID&0000
+; ...its AVRCP: remote control (AVCTP, buttons, absolute volume) and the target
+; record, which only needs to be kept away from the inbox AvrcpTransport
+%LdacA2dp.AvrcpDesc% = LdacA2dp_Avrcp, BTHENUM\{0000110e-0000-1000-8000-00805f9b34fb}_VID&000102b0_PID&0000
+%LdacA2dp.IdleDesc%  = LdacA2dp_Idle,  BTHENUM\{0000110c-0000-1000-8000-00805f9b34fb}_VID&000102b0_PID&0000
 
 [LdacA2dp_Device.NT]
 CopyFiles = LdacA2dp_CopyFiles
@@ -54,6 +58,33 @@ KmdfService = LdacA2dp, LdacA2dp_wdfsect
 
 [LdacA2dp_wdfsect]
 KmdfLibraryVersion = $KMDFVERSION$
+
+; ---- AVRCP: same driver, buttons through a VHF consumer-control HID device ----
+
+[LdacA2dp_Avrcp.NT]
+CopyFiles = LdacA2dp_CopyFiles
+
+[LdacA2dp_Avrcp.NT.HW]
+AddReg = LdacA2dp_Avrcp.HW.AddReg
+
+[LdacA2dp_Avrcp.HW.AddReg]
+; vhf.sys (inbox, hidvhf.inf preconfigures the service) under our FDO
+HKR,,"LowerFilters",0x00010000,"vhf"
+
+[LdacA2dp_Avrcp.NT.Services]
+AddService = LdacA2dp, 0x00000002, LdacA2dp_Service
+
+[LdacA2dp_Avrcp.NT.Wdf]
+KmdfService = LdacA2dp, LdacA2dp_wdfsect
+
+[LdacA2dp_Idle.NT]
+CopyFiles = LdacA2dp_CopyFiles
+
+[LdacA2dp_Idle.NT.Services]
+AddService = LdacA2dp, 0x00000002, LdacA2dp_Service
+
+[LdacA2dp_Idle.NT.Wdf]
+KmdfService = LdacA2dp, LdacA2dp_wdfsect
 
 ; ---- audio endpoint: render interfaces of the ACX circuit "Headphones0" ----
 
@@ -87,4 +118,6 @@ ManufacturerName     = "LDAC A2DP Project"
 DiskName             = "LDAC A2DP Installation Disk"
 LdacA2dp.DeviceDesc  = "LDAC A2DP Source"
 LdacA2dp.SvcDesc     = "LDAC A2DP Source Profile Driver"
+LdacA2dp.AvrcpDesc   = "LDAC A2DP Remote Control"
+LdacA2dp.IdleDesc    = "LDAC A2DP Remote Control Target"
 LdacA2dp.Headphones.szPname = "LDAC A2DP"

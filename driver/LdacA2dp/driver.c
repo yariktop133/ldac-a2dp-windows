@@ -19,8 +19,29 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
     status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config, &driver);
     if (!NT_SUCCESS(status))
         return status;
+    PeerInitialize();
     ACX_DRIVER_CONFIG_INIT(&acxConfig);
     return AcxDriverInitialize(driver, &acxConfig);
+}
+
+/* Which of the headphones' devnodes this is, from its hardware IDs. */
+static DEVICE_ROLE DetectRole(_In_ PWDFDEVICE_INIT DeviceInit)
+{
+    WCHAR ids[512];
+    ULONG got = 0;
+    PWCHAR p;
+
+    RtlZeroMemory(ids, sizeof(ids));
+    if (!NT_SUCCESS(WdfFdoInitQueryProperty(DeviceInit, DevicePropertyHardwareID, sizeof(ids) - 2 * sizeof(WCHAR), ids,
+                                            &got)))
+        return RoleA2dp;
+    for (p = ids; *p; p++) {
+        if (_wcsnicmp(p, L"{0000110e", 9) == 0)
+            return RoleAvrcp;
+        if (_wcsnicmp(p, L"{0000110c", 9) == 0)
+            return RoleIdle;
+    }
+    return RoleA2dp;
 }
 
 NTSTATUS LdacA2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT DeviceInit)
@@ -34,10 +55,20 @@ NTSTATUS LdacA2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Dev
     WDF_DEVICE_PNP_CAPABILITIES pnpCaps;
     WDFDEVICE device;
     PDEVICE_CONTEXT ctx;
+    DEVICE_ROLE role;
     NTSTATUS status;
 
     UNREFERENCED_PARAMETER(Driver);
     PAGED_CODE();
+
+    role = DetectRole(DeviceInit);
+    if (role == RoleIdle) {
+        WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, DEVICE_CONTEXT);
+        status = WdfDeviceCreate(&DeviceInit, &attributes, &device);
+        if (NT_SUCCESS(status))
+            GetDeviceContext(device)->Role = RoleIdle;
+        return status;
+    }
 
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnp);
     pnp.EvtDevicePrepareHardware = LdacA2dpEvtPrepareHardware;
@@ -49,26 +80,34 @@ NTSTATUS LdacA2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Dev
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, REQUEST_CONTEXT);
     WdfDeviceInitSetRequestAttributes(DeviceInit, &attributes);
 
-    /* The device is also the headphones' audio endpoint (audio.c). */
-    ACX_DEVICEINIT_CONFIG_INIT(&acxInitConfig);
-    status = AcxDeviceInitInitialize(DeviceInit, &acxInitConfig);
-    if (!NT_SUCCESS(status))
-        return status;
+    /* The A2DP device is also the headphones' audio endpoint (audio.c). */
+    if (role == RoleA2dp) {
+        ACX_DEVICEINIT_CONFIG_INIT(&acxInitConfig);
+        status = AcxDeviceInitInitialize(DeviceInit, &acxInitConfig);
+        if (!NT_SUCCESS(status))
+            return status;
+    }
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, DEVICE_CONTEXT);
     status = WdfDeviceCreate(&DeviceInit, &attributes, &device);
     if (!NT_SUCCESS(status))
         return status;
-    ACX_DEVICE_CONFIG_INIT(&acxConfig);
-    status = AcxDeviceInitialize(device, &acxConfig);
-    if (!NT_SUCCESS(status))
-        return status;
+    if (role == RoleA2dp) {
+        ACX_DEVICE_CONFIG_INIT(&acxConfig);
+        status = AcxDeviceInitialize(device, &acxConfig);
+        if (!NT_SUCCESS(status))
+            return status;
+    }
     WDF_DEVICE_PNP_CAPABILITIES_INIT(&pnpCaps);
     pnpCaps.SurpriseRemovalOK = WdfTrue;
     WdfDeviceSetPnpCapabilities(device, &pnpCaps);
 
     ctx = GetDeviceContext(device);
     ctx->Device = device;
+    ctx->Role = role;
+    ctx->Psm = role == RoleAvrcp ? AVRCP_PSM : AVDTP_PSM;
+    ctx->RemoteVolume = -1;
+    ctx->HeadphoneVolume = -1;
     ctx->IoTarget = WdfDeviceGetIoTarget(device);
     ctx->Sig.Device = ctx;
     ctx->Sig.Kind = ChannelSignaling;
@@ -88,6 +127,8 @@ NTSTATUS LdacA2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Dev
     status = WdfTimerCreate(&timerConfig, &attributes, &ctx->SignalTimer);
     if (!NT_SUCCESS(status))
         return status;
+    if (role == RoleAvrcp)
+        return STATUS_SUCCESS; /* no I/O interface: AVRCP talks only to the headphones and VHF */
 
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
     queueConfig.EvtIoDeviceControl = LdacA2dpEvtIoDeviceControl;
@@ -110,6 +151,8 @@ NTSTATUS LdacA2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw
     UNREFERENCED_PARAMETER(Raw);
     UNREFERENCED_PARAMETER(Translated);
     PAGED_CODE();
+    if (ctx->Role == RoleIdle)
+        return STATUS_SUCCESS;
 
     status = WdfFdoQueryForInterface(Device, &GUID_BTHDDI_PROFILE_DRIVER_INTERFACE,
                                      (PINTERFACE)&ctx->ProfileInterface, sizeof(ctx->ProfileInterface),
@@ -118,7 +161,7 @@ NTSTATUS LdacA2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw
         return status;
 
     status = L2capInitialize(ctx);
-    if (!NT_SUCCESS(status))
+    if (!NT_SUCCESS(status) || ctx->Role != RoleA2dp)
         return status;
     AudioNameFromBluetooth(ctx); /* before the endpoint gets built */
     return AcxDeviceAddCircuit(Device, ctx->Render);
@@ -138,10 +181,15 @@ NTSTATUS LdacA2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Tra
 NTSTATUS LdacA2dpEvtSelfManagedIoInit(_In_ WDFDEVICE Device)
 {
     PDEVICE_CONTEXT ctx = GetDeviceContext(Device);
-    NTSTATUS status = L2capQueryAddresses(ctx);
+    NTSTATUS status;
 
+    if (ctx->Role == RoleIdle)
+        return STATUS_SUCCESS;
+    status = L2capQueryAddresses(ctx);
     if (!NT_SUCCESS(status))
         return status;
+    if (ctx->Role == RoleAvrcp)
+        return AvrcpStart(ctx);
 
     WdfSpinLockAcquire(ctx->Lock);
     avdtp_src_init(&ctx->Avdtp, &LdacA2dpAvdtpOps, ctx, &ctx->Prefs);
@@ -163,6 +211,7 @@ NTSTATUS LdacA2dpEvtSelfManagedIoInit(_In_ WDFDEVICE Device)
         ctx->LastError = status;
         WdfSpinLockRelease(ctx->Lock);
     }
+    PeerAttach(ctx);
     return STATUS_SUCCESS;
 }
 
@@ -170,6 +219,12 @@ VOID LdacA2dpEvtSelfManagedIoCleanup(_In_ WDFDEVICE Device)
 {
     PDEVICE_CONTEXT ctx = GetDeviceContext(Device);
 
+    if (ctx->Role == RoleIdle)
+        return;
+    if (ctx->Role == RoleAvrcp)
+        AvrcpStop(ctx);
+    else
+        PeerDetach(ctx);
     WdfTimerStop(ctx->SignalTimer, TRUE);
     L2capUnregisterServer(ctx); /* no new incoming channels from here on */
     L2capCloseChannelSync(&ctx->Media);
@@ -180,6 +235,10 @@ VOID LdacA2dpEvtSignalTimer(_In_ WDFTIMER Timer)
 {
     PDEVICE_CONTEXT ctx = GetDeviceContext(WdfTimerGetParentObject(Timer));
 
+    if (ctx->Role == RoleAvrcp) {
+        AvrcpOnTimer(ctx);
+        return;
+    }
     WdfSpinLockAcquire(ctx->Lock);
     if (ctx->Avdtp.state == AVDTP_SRC_WAIT_MEDIA && !ctx->Avdtp.pend_active) {
         ctx->LastError = STATUS_IO_TIMEOUT; /* media channel never came up */

@@ -73,6 +73,10 @@ VOID AvdtpRunDeferred(_In_ PDEVICE_CONTEXT Ctx)
 
 VOID AvdtpOnSignalReceived(_In_ PDEVICE_CONTEXT Ctx, _In_reads_bytes_(Length) const UCHAR *Data, _In_ size_t Length)
 {
+    if (Ctx->Role == RoleAvrcp) {
+        AvrcpOnSignalReceived(Ctx, Data, Length);
+        return;
+    }
     WdfSpinLockAcquire(Ctx->Lock);
     (VOID)avdtp_src_on_signal(&Ctx->Avdtp, Data, Length);
     WdfSpinLockRelease(Ctx->Lock);
@@ -82,6 +86,11 @@ VOID AvdtpOnSignalReceived(_In_ PDEVICE_CONTEXT Ctx, _In_reads_bytes_(Length) co
 VOID AvdtpOnChannelOpened(_In_ PL2CAP_CHANNEL Channel, _In_ NTSTATUS Status)
 {
     PDEVICE_CONTEXT ctx = Channel->Device;
+
+    if (ctx->Role == RoleAvrcp) {
+        AvrcpOnChannelOpened(Channel, Status);
+        return;
+    }
 
     WdfSpinLockAcquire(ctx->Lock);
     if (!NT_SUCCESS(Status)) {
@@ -101,11 +110,21 @@ VOID AvdtpOnChannelOpened(_In_ PL2CAP_CHANNEL Channel, _In_ NTSTATUS Status)
     }
     WdfSpinLockRelease(ctx->Lock);
     AvdtpRunDeferred(ctx);
+    /* AVRCP follows the opened stream, as the reference shows: the headphones
+     * close AVCTP while A2DP is set up again and open it once the media
+     * channel is up. We try too (some sinks wait for the source). */
+    if (NT_SUCCESS(Status) && Channel->Kind == ChannelMedia)
+        PeerA2dpConnected(ctx);
 }
 
 VOID AvdtpOnChannelClosed(_In_ PL2CAP_CHANNEL Channel)
 {
     PDEVICE_CONTEXT ctx = Channel->Device;
+
+    if (ctx->Role == RoleAvrcp) {
+        AvrcpOnChannelClosed(Channel);
+        return;
+    }
 
     WdfSpinLockAcquire(ctx->Lock);
     Channel->Open = FALSE;
