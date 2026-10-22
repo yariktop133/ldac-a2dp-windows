@@ -201,6 +201,7 @@ VOID AudioFillStatus(_In_ PDEVICE_CONTEXT Ctx, _Inout_ LDACA2DP_STATUS *Out)
     Out->PcmChannels = Ctx->PcmFormat.Channels;
     Out->PcmBitsPerSample = Ctx->PcmFormat.BitsPerSample;
     Out->PcmRunning = Ctx->PcmRunning;
+    Out->PcmOpen = Ctx->PcmOpenStreams > 0;
     Out->PcmBuffered = Ctx->PcmCount;
     Out->PcmDroppedBytes = Ctx->PcmDroppedBytes;
     WdfSpinLockRelease(Ctx->PcmLock);
@@ -537,6 +538,7 @@ static NTSTATUS AudioEvtStreamPrepareHardware(_In_ ACXSTREAM Stream)
         return status;
     GetStreamTimerContext(rs->Timer)->Stream = rs;
     PcmSetFormat(rs->Dev, rs->Format, FALSE);
+    InterlockedIncrement(&rs->Dev->PcmOpenStreams);
     rs->State = AcxStreamStatePause;
     return STATUS_SUCCESS;
 }
@@ -559,6 +561,7 @@ static NTSTATUS AudioEvtStreamReleaseHardware(_In_ ACXSTREAM Stream)
     rs->CurrentPacket = 0;
     rs->State = AcxStreamStateStop;
     PcmSetRunning(rs->Dev, FALSE);
+    InterlockedDecrement(&rs->Dev->PcmOpenStreams);
     return STATUS_SUCCESS;
 }
 

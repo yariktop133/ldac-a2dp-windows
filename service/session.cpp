@@ -133,6 +133,11 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
     auto startedAt = start, nextTrace = start;  // -v: queue trace for 3 s after START
     double maxGapMs = 0;
     unsigned maxQueue = 0;
+    // While the endpoint stream is open (an application paused, between
+    // sounds) the A2DP stream stays started and silence keeps the link busy:
+    // an idle link stalls again for ~0.5 s on the next sound (see warm-up).
+    auto lastFeed = start;
+    bool wasHeld = false;
 
     while (!stop) {
         in.clear();
@@ -146,16 +151,34 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
             fprintf(pcmIndex, "%.1f %zu %d %d %u\n", std::chrono::duration<double, std::milli>(now - start).count(),
                     in.size() / 2, streaming ? 1 : 0, warming ? 1 : 0, src->Rate());
         }
-        if (!in.empty()) {
+        bool real = !in.empty();
+        if (real) {
             if (streaming)
                 maxGapMs = std::max(maxGapMs, std::chrono::duration<double, std::milli>(now - lastData).count());
-            lastData = now;
+            lastData = lastFeed = now;
+        }
+        bool held = src->DataMeansSound() && src->StreamOpen();
+        if (o.verbose && held != wasHeld)
+            printf("%.1fs endpoint stream %s\n", std::chrono::duration<double>(now - start).count(),
+                   held ? "opened" : "closed");
+        wasHeld = held;
+        if (streaming && !real && held && now - lastData > std::chrono::milliseconds(50)) {
+            // Exactly the real pace (a short Read wait lasts a whole 15.6 ms
+            // timer tick, so fixed small steps fell behind and the sink ran
+            // dry, stuttering on resume), but without refilling the 50 ms it
+            // took to notice the pause: that burst reads as congestion to ABR.
+            if (lastFeed == lastData)
+                lastFeed = now - std::chrono::milliseconds(10);
+            double secs = std::min(std::chrono::duration<double>(now - lastFeed).count(), 0.040);
+            size_t frames = (size_t)(secs * src->Rate());
+            in.assign(frames * src->Channels(), 0.0f);  // the stream is open but nothing plays
+            lastFeed = now;
         }
 
         float peak = 0;
         for (float v : in)
             peak = std::max(peak, std::fabs(v));
-        if (peak > 1e-4f || (src->DataMeansSound() && !in.empty()))
+        if (peak > 1e-4f || (src->DataMeansSound() && real) || held)
             lastSound = now;
         bool silent = now - lastSound > std::chrono::seconds(3);
 

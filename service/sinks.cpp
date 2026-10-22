@@ -335,6 +335,26 @@ public:
     int Channels() const override { return 2; }
     bool DataMeansSound() const override { return true; }
 
+    bool StreamOpen() override
+    {
+        auto now = Clock::now();
+        if (now >= nextOpenPoll_) {
+            nextOpenPoll_ = now + std::chrono::milliseconds(100);
+            LDACA2DP_STATUS st;
+            OVERLAPPED ov{};
+            DWORD n = 0;
+            ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            BOOL ok = DeviceIoControl(handle_, IOCTL_LDACA2DP_GET_STATUS, nullptr, 0, &st, sizeof(st), nullptr, &ov);
+            if (!ok && GetLastError() == ERROR_IO_PENDING)
+                ok = GetOverlappedResult(handle_, &ov, &n, TRUE);
+            else if (ok)
+                GetOverlappedResult(handle_, &ov, &n, FALSE);
+            CloseHandle(ov.hEvent);
+            open_ = ok && n == sizeof(st) && st.PcmOpen;
+        }
+        return open_;
+    }
+
     std::string Describe() const override
     {
         return "LdacA2dp endpoint (" + std::to_string(rate_) + " Hz)";
@@ -419,6 +439,8 @@ private:
     bool pending_ = false;
     uint32_t rate_ = 48000;
     std::vector<uint8_t> buffer_;
+    bool open_ = false;
+    Clock::time_point nextOpenPoll_{};
 };
 
 // ---- simulated link (no driver, no radio) ------------------------------------

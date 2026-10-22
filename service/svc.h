@@ -78,6 +78,9 @@ public:
     // then any data counts as sound, however quiet. Otherwise (loopback, files)
     // the stream starts on a signal above the silence threshold.
     virtual bool DataMeansSound() const { return false; }
+    // Whether the producer keeps its stream open (the endpoint: an application
+    // has it open, even paused). Polled on every pass, keep it cheap.
+    virtual bool StreamOpen() { return false; }
 };
 
 std::unique_ptr<AudioSource> MakeLoopbackSource(const std::string &endpointMatch);

@@ -68,8 +68,9 @@ typedef struct _LDACA2DP_STATUS {
     UINT32 PcmSampleRate;     /* endpoint format of the current (or last) render stream, 0 if none yet */
     UINT16 PcmChannels;
     UINT16 PcmBitsPerSample;
-    UINT8 PcmRunning;         /* an application stream is running on the endpoint */
-    UINT8 Reserved2[3];
+    UINT8 PcmRunning;         /* the endpoint stream is running (audio flows) */
+    UINT8 PcmOpen;            /* the audio engine has the endpoint stream open (running or paused) */
+    UINT8 Reserved2[2];
     UINT32 PcmBuffered;       /* bytes waiting for READ_PCM */
     UINT64 PcmDroppedBytes;   /* overwritten before anyone read them */
 } LDACA2DP_STATUS;

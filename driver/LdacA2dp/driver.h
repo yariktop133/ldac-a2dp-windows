@@ -90,6 +90,7 @@ typedef struct _DEVICE_CONTEXT {
     LDACA2DP_PCM_HEADER PcmFormat; /* Bytes unused; Flags carries a pending discontinuity */
     ULONG PcmBlockAlign;
     BOOLEAN PcmRunning;
+    LONG PcmOpenStreams;       /* streams between prepare and release hardware */
     UINT64 PcmDroppedBytes;
     WDFQUEUE PcmReadQueue;     /* manual: READ_PCM waiting for audio */
 
