@@ -28,6 +28,7 @@ struct DeviceSettings {
     bool bits24 = true;
     int eqmid = 1;             // LDACBT_EQMID_SQ
     bool adaptive = true;
+    int holdSeconds = 3;       // keep the stream started this long after the last sound
 };
 
 std::string DataRoot();  // %ProgramData%\LdacA2dp
@@ -55,9 +56,21 @@ struct LinkInfo {
 // when LDAC is off or the sink has no LDAC.
 bool ConfigMatches(const a2dp_prefs &prefs, const LinkInfo &link);
 
-void WriteStatus(const std::string &address, const LinkInfo &link, int bitDepth, int kbps);
+// What the session knows beyond the link, for the settings utility (status file).
+struct SessionInfo {
+    bool streaming = false;
+    std::string quality;       // current encoder step (ABR), e.g. "SQ", "Q0", "bp53"
+    unsigned long long dropped = 0;
+    int avrcp = -1;            // LDACA2DP_AVRCP_*, -1 unknown (no driver)
+    bool absoluteVolume = false;
+    double volumeDb = 0;
+    bool muted = false;
+};
+
+void WriteStatus(const std::string &address, const LinkInfo &link, int bitDepth, int kbps, const SessionInfo &s);
 void ClearStatus(const std::string &address);
 std::string ChannelModeName(uint8_t cm);
+std::string LinkChannelMode(const LinkInfo &link);  // SBC: from its configuration
 
 // ---- audio sources (capture.cpp) ------------------------------------------
 
@@ -151,6 +164,8 @@ public:
     // Polled on every pass of the session loop: false (with the reason) once the
     // stream or the device is gone.
     virtual bool Alive(std::string &why) { (void)why; return true; }
+    // Driver-side state for the status file (AVRCP, volume); false if none.
+    virtual bool Info(SessionInfo &s) { (void)s; return false; }
     // Tear the stream down so the next Open negotiates it again.
     virtual void Disconnect() {}
 };

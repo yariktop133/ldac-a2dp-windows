@@ -68,7 +68,7 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
     if (addr == 0)
         addr = ParseAddress(address);
     printf("link: %s, %s %u Hz %s, MTU %d, delay %.1f ms\n", sink->Describe().c_str(), info.codec.c_str(),
-           info.sampleRate, ChannelModeName(info.ldacCm).c_str(), info.mtu, info.delay100us / 10.0);
+           info.sampleRate, LinkChannelMode(info).c_str(), info.mtu, info.delay100us / 10.0);
 
     if (info.codec != "SBC" && info.codec != "LDAC")
         return err = "encoder: unsupported codec " + info.codec, SessionEnd::Error;
@@ -193,7 +193,7 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
             peak = std::max(peak, std::fabs(v));
         if (peak > 1e-4f || (src->DataMeansSound() && real) || held)
             lastSound = now;
-        bool silent = now - lastSound > std::chrono::seconds(3);
+        bool silent = now - lastSound > std::chrono::seconds(settings.holdSeconds);
 
         // START only while there is audio, SUSPEND after 3 s of silence (as the reference does).
         if (!streaming && !silent && !in.empty()) {
@@ -296,7 +296,12 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
         }
         if (now >= nextCheck) {
             nextCheck += std::chrono::seconds(1);
-            WriteStatus(address, info, enc->BitDepth(), enc->NominalKbps());
+            SessionInfo si;
+            sink->Info(si);
+            si.streaming = streaming;
+            si.quality = enc->Quality();
+            si.dropped = dropped;
+            WriteStatus(address, info, enc->BitDepth(), enc->NominalKbps(), si);
 
             long long stamp = o.watchSettings ? SettingsStamp() : settingsStamp;
             if (stamp != settingsStamp) {

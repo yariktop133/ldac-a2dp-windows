@@ -12,7 +12,7 @@
 | `service/` | `ldacsvc`: служба кодирования — WASAPI loopback или WAV → ресемплинг → LDAC + ABR или SBC → медиапакеты в драйвер (IOCTL) или в имитацию канала; читает `settings.json`, пишет статус для утилиты. |
 | `tools/hci/` | Разбор журналов Bluetooth: `btvs` → pcap, ETL → btsnoop, декодер L2CAP/AVDTP/медиа. |
 | `tools/ldacenc/` | WAV → LDAC-пакеты A2DP, симуляция радиоканала и ABR. |
-| `ui/LdacConfig/` | Утилита настроек (WPF, .NET 10, тема Fluent). |
+| `ui/LdacConfig/` | Утилита настроек (WPF, .NET 10, тема Fluent): кодек, частоты, качество, выдержка после звука; текущее состояние — кодек, качество, громкость, AVRCP, служба. |
 | `third_party/libldac` | AOSP `external/libldac` (Apache-2.0), коммит `eeee1a3f`. |
 | `third_party/sbc_encoder` | SBC-кодер AOSP (`system/embdrv/sbc/encoder`, Apache-2.0), см. `SOURCE.md`. |
 | `tools/stand/` | Подпись драйвера тестовым сертификатом, пакет и установка на тестовую ВМ (`docs/test-stand.md`). |
@@ -80,7 +80,8 @@ build\ldacsvc.exe uninstall
 
 - [x] Этап 2: libldac собран под Windows, утилита кодирования, размеры пакетов под MTU.
 - [x] Этап 3: логика AVDTP проверена на симуляторе (LDAC, откат на SBC, пиры AVDTP 1.2, конфигурация со стороны наушников, delay report, таймауты).
-- [x] Этап 6 (часть): утилита настроек, формат настроек — `docs/settings-format.md`; пакет установки (`tools/package/make-package.ps1`, `installer/`).
+- [x] Этап 6 (часть): утилита настроек с состоянием службы, AVRCP и громкости; формат настроек — `docs/settings-format.md`; пакет установки (`tools/package/make-package.ps1`, `installer/`).
+- [x] SBC на JBL Live 780NC: служба по настройке пересогласует поток (SBC 48 кГц, Joint Stereo, bitpool 53, 5 кадров на пакет, 357 кбит/с), передача без отказов, на слух чисто; AVRCP работает и с SBC.
 - [x] Этап 1: эталонная сессия LDAC с JBL Live 780NC через `btvs` — `docs/jbl-live-780nc.md`.
 - [x] Проверка декодированием: LDAC — открытым libldacdec (собирается MSVC скриптом `tools/ldacverify`), SBC — ffmpeg; результаты в `docs/verification.md`.
 - [x] Этап 4: KMDF-драйвер `driver/LdacA2dp` работает на железе (тестовая ВМ, адаптер Realtek 5.4, JBL Live 780NC, 22.10.2026): сам согласует LDAC 96 кГц / MTU 679 / задержка 150 мс, звук от `ldacsvc` слышен в наушниках, 3000 пакетов без потерь. ABR на канале VirtualBox держит SQ–Q0.

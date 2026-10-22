@@ -112,7 +112,7 @@
                         </ComboBox>
                         <Button Content="Установить" Margin="40,0,0,0" IsEnabled="False"
                                 ToolTipService.ShowOnDisabled="True"
-                                ToolTip="Установка драйвера (INF + pnputil) появится на этапе 6. Сейчас выбор только сохраняется в настройках." />
+                                ToolTip="Драйвер ставится и снимается вместе с пакетом LDAC A2DP: install.cmd и «Параметры → Приложения → LDAC A2DP → Удалить» (наушники вернутся на драйвер Microsoft)." />
                     </StackPanel>
 
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Настройки КОДЕКА" />
@@ -196,6 +196,18 @@
                                    Text="Качество кодирования можно изменить в любое время, и оно задействуется при передаче следующего медиа-пакета." />
                     </StackPanel>
 
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Держать передачу после звука" />
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox Width="140" ItemsSource="{Binding Settings.HoldChoices}" SelectedItem="{Binding Settings.HoldSeconds}"
+                                  ItemStringFormat="{}{0} с" />
+                        <TextBlock Style="{StaticResource InfoIcon}">
+                            <TextBlock.ToolTip>
+                                <TextBlock MaxWidth="380" TextWrapping="Wrap"
+                                           Text="После паузы наушникам нужно около секунды, чтобы снова принять поток, и начало звука теряется. Пока плеер открыт, поток держится сам; для коротких звуков (уведомления) передача остаётся включённой столько секунд после звука. Больше — меньше обрезанных звуков, но дольше в эфире идёт тишина." />
+                            </TextBlock.ToolTip>
+                        </TextBlock>
+                    </StackPanel>
+
                     <TextBlock Style="{StaticResource SectionHeader}" Text="Текущее состояние" Margin="0,32,0,12" />
                     <Grid DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                         <Grid.ColumnDefinitions>
@@ -203,6 +215,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
                             <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Text="Тип КОДЕКА" Margin="0,3" />
@@ -215,9 +228,21 @@
                         <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding StatusBitDepth}" Margin="0,3" />
                         <TextBlock Grid.Row="4" Text="Скорость потока" Margin="0,3" />
                         <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding StatusBitrate}" Margin="0,3" />
-                        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,8,0,0" TextWrapping="Wrap"
+                        <TextBlock Grid.Row="5" Text="Передача" Margin="0,3" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding StatusStreaming}" Margin="0,3" />
+                        <TextBlock Grid.Row="6" Text="Текущее качество" Margin="0,3" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding StatusQuality}" Margin="0,3" />
+                        <TextBlock Grid.Row="7" Text="Громкость" Margin="0,3" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding StatusVolume}" Margin="0,3" />
+                        <TextBlock Grid.Row="8" Text="AVRCP (громкость, кнопки)" Margin="0,3" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding StatusAvrcp}" Margin="0,3" />
+                        <TextBlock Grid.Row="9" Text="Отброшено пакетов" Margin="0,3" />
+                        <TextBlock Grid.Row="9" Grid.Column="1" Text="{Binding StatusDropped}" Margin="0,3" />
+                        <TextBlock Grid.Row="10" Text="Служба кодирования" Margin="0,3" />
+                        <TextBlock Grid.Row="10" Grid.Column="1" Text="{Binding ServiceState}" Margin="0,3" />
+                        <TextBlock Grid.Row="11" Grid.ColumnSpan="2" Margin="0,8,0,0" TextWrapping="Wrap"
                                    Foreground="{StaticResource SecondaryText}"
-                                   Text="Нет данных: служба кодирования не запущена (драйвер ещё не установлен)."
+                                   Text="Нет данных: наушники не подключены, их обслуживает другой драйвер, или служба кодирования не запущена."
                                    Visibility="{Binding HasStatus, Converter={StaticResource InverseBoolToVis}}" />
                     </Grid>
 
@@ -238,8 +263,9 @@
                 </TextBlock>
                 <TextBox IsReadOnly="True" Text="{Binding SettingsPath, Mode=OneWay}" Margin="0,8,0,0" />
                 <TextBlock TextWrapping="Wrap" FontSize="14" Margin="0,16,0,0" Foreground="{StaticResource SecondaryText}">
-                    Состояние проекта: ядро протокола и кодировщик готовы и проверены на симуляторе;
-                    драйвер ядра (этап 4) и служба кодирования ещё не установлены.
+                    Состав: драйвер LdacA2dp (A2DP, звуковое устройство «Наушники», AVRCP — абсолютная громкость
+                    и кнопки наушников), служба кодирования LdacSvc и эта утилита. Журнал службы:
+                    %ProgramData%\LdacA2dp\ldacsvc.log.
                 </TextBlock>
             </StackPanel>
 
@@ -256,7 +282,10 @@
                                Text="990 кбит/с требуют чистого радиоканала. Включите автоматическое снижение качества или выберите SQ. Wi-Fi 2.4 ГГц рядом с адаптером тоже мешает." />
                     <TextBlock FontWeight="SemiBold" FontSize="16" Text="Сломается ли гарнитура для звонков?" />
                     <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
-                               Text="Нет: звонки идут через профиль HFP со своим драйвером (BthHFP). Заменяется только A2DP." />
+                               Text="Нет: звонки идут через профиль HFP со своим драйвером (BthHFP). Заменяются A2DP и AVRCP." />
+                    <TextBlock FontWeight="SemiBold" FontSize="16" Text="Почему у коротких звуков пропадает начало?" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
+                               Text="После паузы наушникам нужно около секунды, чтобы снова принимать поток. Увеличьте «Держать передачу после звука» — тогда серия уведомлений пройдёт без потерь." />
                     <TextBlock FontWeight="SemiBold" FontSize="16" Text="Что делает «Загрузите наиболее часто используемые настройки»?" />
                     <TextBlock TextWrapping="Wrap" Margin="0,4,0,16" Foreground="{StaticResource SecondaryText}"
                                Text="Для LDAC: стерео, все частоты 44.1–96 кГц, 16 и 24 бит, качество SQ, адаптивный битрейт включён. Для SBC: стерео, 44.1/48 кГц, Joint Stereo." />

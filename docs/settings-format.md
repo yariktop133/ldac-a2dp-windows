@@ -1,6 +1,6 @@
 # Формат настроек и статуса
 
-Утилита `LdacConfig` пишет, служба кодирования (этап 5) читает.
+Утилита `LdacConfig` пишет, служба кодирования `LdacSvc` читает и применяет изменения на лету (проверяет время записи файла раз в секунду).
 
 ## `%ProgramData%\LdacA2dp\settings.json`
 
@@ -16,7 +16,8 @@
       "bits16": true, "bits24": true,
       "channelMode": "Stereo",
       "quality": "SQ",
-      "adaptive": true
+      "adaptive": true,
+      "holdSeconds": 3
     }
   }
 }
@@ -32,13 +33,26 @@
 | `bits16/24` | формат PCM на входе `ldacBT_init_handle_encode` (`S16`/`S24`) |
 | `quality` | `LDACBT_EQMID_MQ/SQ/HQ`, меняется на лету через `ldacBT_set_eqmid` |
 | `adaptive` | `ldac_ABR_Proc(..., flagEnable = 1)` |
+| `holdSeconds` | сколько секунд держать поток в START после последнего звука, если поток Windows уже закрыт (1–600, по умолчанию 3). Пока поток Windows открыт, передача держится и без этого |
 
 Утилита не даёт снять последний флажок в группе, поэтому пустых масок в файле не бывает.
 
 ## `%ProgramData%\LdacA2dp\status\<AA-BB-CC-DD-EE-FF>.json`
 
-Пишет служба во время воспроизведения, утилита опрашивает раз в секунду и показывает в разделе «Текущее состояние»:
+Служба пишет его раз в секунду, пока обслуживает наушники, и удаляет в конце сессии. Утилита опрашивает файл раз в секунду и показывает в разделе «Текущее состояние». Если файл старше 5 с, утилита считает, что данных нет.
 
 ```json
-{ "codec": "LDAC", "channelMode": "Stereo", "sampleRate": 96000, "bitDepth": 24, "bitrateKbps": 660 }
+{ "codec": "SBC", "channelMode": "Joint Stereo", "sampleRate": 48000, "bitDepth": 16, "bitrateKbps": 357,
+  "streaming": false, "quality": "bp53", "droppedPackets": 0,
+  "avrcp": "absoluteVolume", "absoluteVolume": true, "volumeDb": -17.8, "muted": false }
 ```
+
+| Поле | Значение |
+|---|---|
+| `streaming` | поток в START (идёт звук или тишина в паузе), иначе SUSPEND |
+| `quality` | текущий шаг кодера: для LDAC `HQ`/`SQ`/`Q0`/`Q1`/`MQ` (ABR), для SBC `bp<bitpool>` |
+| `droppedPackets` | пакеты, которые служба не смогла поставить в очередь драйвера за сессию |
+| `avrcp` | `none` (нет AVRCP-устройства), `closed`, `opening`, `connected`, `absoluteVolume`, `noAbsoluteVolume` |
+| `absoluteVolume`, `volumeDb`, `muted` | громкость конечной точки и кто её применяет: наушники (AVRCP) или служба |
+
+Состояние самой службы (работает, остановлена, не установлена) утилита берёт у диспетчера служб.

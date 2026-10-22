@@ -24,6 +24,54 @@ public static class BluetoothAudioDevices
     }
 }
 
+/// <summary>State of the LdacSvc encoder service, straight from the service control manager.</summary>
+public static class EncoderService
+{
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr OpenSCManagerW(string? machine, string? database, uint access);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr OpenServiceW(IntPtr scm, string name, uint access);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool QueryServiceStatus(IntPtr service, out ServiceStatus status);
+    [System.Runtime.InteropServices.DllImport("advapi32.dll")]
+    private static extern bool CloseServiceHandle(IntPtr handle);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct ServiceStatus
+    {
+        public uint Type, State, ControlsAccepted, Win32ExitCode, SpecificExitCode, CheckPoint, WaitHint;
+    }
+
+    /// <summary>"работает", "остановлена", "не установлена", ...</summary>
+    public static string State()
+    {
+        IntPtr scm = OpenSCManagerW(null, null, 0x0001 /* CONNECT */);
+        if (scm == IntPtr.Zero)
+            return "неизвестно";
+        try
+        {
+            IntPtr svc = OpenServiceW(scm, "LdacSvc", 0x0004 /* QUERY_STATUS */);
+            if (svc == IntPtr.Zero)
+                return "не установлена";
+            try
+            {
+                if (!QueryServiceStatus(svc, out var st))
+                    return "неизвестно";
+                return st.State switch
+                {
+                    1 => "остановлена",
+                    2 => "запускается",
+                    3 => "останавливается",
+                    4 => "работает",
+                    _ => "приостановлена",
+                };
+            }
+            finally { CloseServiceHandle(svc); }
+        }
+        finally { CloseServiceHandle(scm); }
+    }
+}
+
 /// <summary>
 /// settings.json: { "devices": { "AA:BB:CC:DD:EE:FF": { ...DeviceSettings... } } }
 /// Lives in %ProgramData%\LdacA2dp so the encoder service (running as a system service) can read it.
@@ -79,7 +127,12 @@ public static class SettingsStore
         try
         {
             var path = StatusPath(address);
-            return File.Exists(path) ? JsonSerializer.Deserialize<LinkStatus>(File.ReadAllText(path), Json) : null;
+            if (!File.Exists(path))
+                return null;
+            var s = JsonSerializer.Deserialize<LinkStatus>(File.ReadAllText(path), Json);
+            if (s is not null)
+                s.Written = File.GetLastWriteTimeUtc(path);
+            return s;
         }
         catch (Exception)
         {

@@ -212,6 +212,8 @@ bool ParseSettings(std::string text, const std::string &address, DeviceSettings 
     std::string q = Text(*dev, "quality", "SQ");
     out.eqmid = q == "HQ" ? 0 : q == "MQ" ? 2 : 1;
     out.adaptive = Flag(*dev, "adaptive", true);
+    if (const Json *h = dev->Get("holdSeconds"); h && h->type == Json::Number && h->n >= 1 && h->n <= 600)
+        out.holdSeconds = (int)h->n;
     if (!out.freqMask || !out.cmMask) {
         note = "settings allow no rate or channel mode, using defaults";
         out = DeviceSettings();
@@ -256,6 +258,14 @@ bool ConfigMatches(const a2dp_prefs &prefs, const LinkInfo &link)
            (link.ldacCm & prefs.ldac_cm_mask);
 }
 
+std::string LinkChannelMode(const LinkInfo &link)
+{
+    if (link.codec == "SBC")
+        return link.sbc.cm == SBC_CM_JOINT ? "Joint Stereo" : link.sbc.cm == SBC_CM_STEREO ? "Stereo"
+             : link.sbc.cm == SBC_CM_DUAL ? "Dual Channel" : "Mono";
+    return ChannelModeName(link.ldacCm);
+}
+
 std::string ChannelModeName(uint8_t cm)
 {
     return cm == LDAC_CM_MONO ? "Mono" : cm == LDAC_CM_DUAL ? "Dual Channel" : "Stereo";
@@ -270,16 +280,22 @@ static std::string StatusFile(const std::string &address)
     return DataRoot() + "\\status\\" + name + ".json";
 }
 
-void WriteStatus(const std::string &address, const LinkInfo &link, int bitDepth, int kbps)
+void WriteStatus(const std::string &address, const LinkInfo &link, int bitDepth, int kbps, const SessionInfo &s)
 {
+    static const char *avrcp[] = { "none", "closed", "opening", "connected", "absoluteVolume", "noAbsoluteVolume" };
     CreateDirectoryA(DataRoot().c_str(), nullptr);
     CreateDirectoryA((DataRoot() + "\\status").c_str(), nullptr);
     std::string path = StatusFile(address), tmp = path + ".tmp";
     FILE *f = fopen(tmp.c_str(), "wb");
     if (!f)
         return;
-    fprintf(f, "{ \"codec\": \"%s\", \"channelMode\": \"%s\", \"sampleRate\": %u, \"bitDepth\": %d, \"bitrateKbps\": %d }\n",
-            link.codec.c_str(), ChannelModeName(link.ldacCm).c_str(), link.sampleRate, bitDepth, kbps);
+    fprintf(f, "{ \"codec\": \"%s\", \"channelMode\": \"%s\", \"sampleRate\": %u, \"bitDepth\": %d, \"bitrateKbps\": %d,\n"
+               "  \"streaming\": %s, \"quality\": \"%s\", \"droppedPackets\": %llu,\n"
+               "  \"avrcp\": \"%s\", \"absoluteVolume\": %s, \"volumeDb\": %.1f, \"muted\": %s }\n",
+            link.codec.c_str(), LinkChannelMode(link).c_str(), link.sampleRate, bitDepth, kbps,
+            s.streaming ? "true" : "false", s.quality.c_str(), s.dropped,
+            s.avrcp >= 0 && s.avrcp < 6 ? avrcp[s.avrcp] : "unknown", s.absoluteVolume ? "true" : "false", s.volumeDb,
+            s.muted ? "true" : "false");
     fclose(f);
     MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 }

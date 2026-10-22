@@ -70,8 +70,29 @@ public sealed class MainViewModel : Observable
 
     // ---- current state ------------------------------------------------------
 
-    private LinkStatus? Status => _selected is null ? null : SettingsStore.ReadStatus(_selected.AddressText);
+    private LinkStatus? _status;
+    private string _serviceState = "";
+    // a status file the service stopped updating (it writes one a second) is not current
+    private LinkStatus? Status => _status is { } s && DateTime.UtcNow - s.Written < TimeSpan.FromSeconds(5) ? s : null;
     public bool HasStatus => Status is not null;
+    public string ServiceState => _serviceState;
+    public string StatusStreaming => Status is { } s ? (s.Streaming ? "идёт" : "пауза (нет звука)") : "—";
+    public string StatusQuality => Status is { } s && s.Quality.Length > 0 ? s.Quality : "—";
+    public string StatusVolume => Status is { } s
+        ? (s.Muted ? "выключен" : $"{s.VolumeDb:0.0} дБ") + (s.AbsoluteVolume ? ", в наушниках (AVRCP)" : ", в службе")
+        : "—";
+    public string StatusAvrcp => Status?.Avrcp switch
+    {
+        null => "—",
+        "absoluteVolume" => "подключён, абсолютная громкость",
+        "noAbsoluteVolume" => "подключён, без абсолютной громкости",
+        "connected" => "подключён",
+        "opening" => "подключается",
+        "closed" => "не подключён",
+        "none" => "нет устройства AVRCP",
+        var other => other,
+    };
+    public string StatusDropped => Status is { } s ? s.DroppedPackets.ToString(CultureInfo.CurrentCulture) : "—";
     public string StatusCodec => Status?.Codec ?? "—";
     public string StatusChannelMode => Status?.ChannelMode ?? "—";
     public string StatusSampleRate => Status is { } s ? FormatRate(s.SampleRate) : "—";
@@ -83,8 +104,12 @@ public sealed class MainViewModel : Observable
 
     private void RaiseStatus()
     {
+        _status = _selected is null ? null : SettingsStore.ReadStatus(_selected.AddressText);
+        _serviceState = EncoderService.State();
         foreach (var p in new[] { nameof(HasStatus), nameof(StatusCodec), nameof(StatusChannelMode),
-                                  nameof(StatusSampleRate), nameof(StatusBitDepth), nameof(StatusBitrate) })
+                                  nameof(StatusSampleRate), nameof(StatusBitDepth), nameof(StatusBitrate),
+                                  nameof(ServiceState), nameof(StatusStreaming), nameof(StatusQuality),
+                                  nameof(StatusVolume), nameof(StatusAvrcp), nameof(StatusDropped) })
             Raise(p);
     }
 
@@ -150,8 +175,8 @@ public sealed class MainViewModel : Observable
         if (_selected is null)
             return;
         OnSettingsChanged(null, new PropertyChangedEventArgs(null));
-        Message = "Настройки сохранены. Переподключение с новым кодеком выполнит служба драйвера " +
-                  "(этап 6), пока она не установлена — переподключите наушники вручную.";
+        Message = "Настройки сохранены. Служба применяет их в течение секунды: кодек, частоту и каналы — " +
+                  "заново согласуя поток с наушниками, качество — без разрыва.";
     }
 }
 

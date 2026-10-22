@@ -79,7 +79,7 @@ static void TestSettings()
                        "      \"allowStereo\": true,\r\n      \"rate44\": false,\r\n      \"rate48\": true,\r\n"
                        "      \"rate88\": false,\r\n      \"rate96\": true,\r\n      \"bits16\": true,\r\n"
                        "      \"bits24\": true,\r\n      \"channelMode\": \"Dual Channel\",\r\n"
-                       "      \"quality\": \"HQ\",\r\n      \"adaptive\": false\r\n    },\r\n"
+                       "      \"quality\": \"HQ\",\r\n      \"adaptive\": false,\r\n      \"holdSeconds\": 15\r\n    },\r\n"
                        "    \"66:77:88:99:AA:BB\": { \"codec\": \"SBC\", \"quality\": \"MQ\" }\r\n  }\r\n}\r\n";
     DeviceSettings s;
     std::string note;
@@ -90,6 +90,7 @@ static void TestSettings()
     CHECK(s.eqmid == 0);
     CHECK(!s.adaptive);
     CHECK(s.bits24);
+    CHECK(s.holdSeconds == 15);
     a2dp_prefs p = ToPrefs(s);
     CHECK(p.ldac_pref_rate == 96000);
     CHECK(p.allow_ldac == 1);
@@ -98,7 +99,7 @@ static void TestSettings()
     CHECK(!s.ldac);
     CHECK(s.eqmid == 2);
     CHECK(!ParseSettings(json, "00:11:22:33:44:55", s, note));      // unknown device: defaults
-    CHECK(s.ldac && s.eqmid == 1 && s.adaptive);
+    CHECK(s.ldac && s.eqmid == 1 && s.adaptive && s.holdSeconds == 3);
     CHECK(!ParseSettings("{ \"devices\": ", "12:34:56:78:9A:BC", s, note));  // truncated file
     CHECK(!ParseSettings("{\"devices\":{\"12:34:56:78:9A:BC\":{\"rate44\":false,\"rate48\":false,"
                          "\"rate88\":false,\"rate96\":false}}}", "12:34:56:78:9A:BC", s, note));  // no rates allowed

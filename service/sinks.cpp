@@ -190,6 +190,18 @@ public:
         return true;
     }
 
+    bool Info(SessionInfo &s) override
+    {
+        LDACA2DP_STATUS st;
+        if (handle_ == INVALID_HANDLE_VALUE || !Status(st))
+            return false;
+        s.avrcp = st.AvrcpState;
+        s.absoluteVolume = st.AbsoluteVolume != 0;
+        s.volumeDb = st.VolumeLevel / 65536.0;
+        s.muted = st.Muted != 0;
+        return true;
+    }
+
     void Disconnect() override
     {
         if (handle_ != INVALID_HANDLE_VALUE)

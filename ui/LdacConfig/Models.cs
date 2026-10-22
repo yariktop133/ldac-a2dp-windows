@@ -41,6 +41,7 @@ public sealed class DeviceSettings : Observable
     private string _channelMode = "Stereo";
     private LdacQuality _quality = LdacQuality.SQ;
     private bool _adaptive = true;
+    private int _holdSeconds = 3;
 
     public DriverChoice Driver { get => _driver; set => Set(ref _driver, value); }
 
@@ -83,6 +84,11 @@ public sealed class DeviceSettings : Observable
     public LdacQuality Quality { get => _quality; set => Set(ref _quality, value); }
     public bool Adaptive { get => _adaptive; set => Set(ref _adaptive, value); }
 
+    /// <summary>Seconds the stream stays started after the last sound (3 = as Windows; more keeps
+    /// a series of short sounds from losing their start to the link setup).</summary>
+    public int HoldSeconds { get => _holdSeconds; set => Set(ref _holdSeconds, value); }
+    [JsonIgnore] public int[] HoldChoices { get; } = [3, 10, 15, 30];
+
     private int RateCount() => Codec == CodecType.SBC
         ? (_rate44 ? 1 : 0) + (_rate48 ? 1 : 0)
         : (_rate44 ? 1 : 0) + (_rate48 ? 1 : 0) + (_rate88 ? 1 : 0) + (_rate96 ? 1 : 0);
@@ -107,6 +113,7 @@ public sealed class DeviceSettings : Observable
         _channelMode = ChannelModes[0];
         _quality = LdacQuality.SQ;
         _adaptive = true;
+        _holdSeconds = 3;
         Raise(string.Empty); // refresh all bindings
     }
 }
@@ -125,5 +132,21 @@ public sealed class BtAudioDevice : Observable
     public required DeviceSettings Settings { get; init; }
 }
 
-/// <summary>Live link state, written by the encoder service to status\&lt;address&gt;.json.</summary>
-public sealed record LinkStatus(string Codec, string ChannelMode, int SampleRate, int BitDepth, int BitrateKbps);
+/// <summary>Live link state, written by the encoder service to status\&lt;address&gt;.json
+/// once a second while it serves the headphones (see service/settings.cpp WriteStatus).</summary>
+public sealed class LinkStatus
+{
+    public string Codec { get; set; } = "";
+    public string ChannelMode { get; set; } = "";
+    public int SampleRate { get; set; }
+    public int BitDepth { get; set; }
+    public int BitrateKbps { get; set; }
+    public bool Streaming { get; set; }
+    public string Quality { get; set; } = "";
+    public long DroppedPackets { get; set; }
+    public string Avrcp { get; set; } = "unknown";
+    public bool AbsoluteVolume { get; set; }
+    public double VolumeDb { get; set; }
+    public bool Muted { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public DateTime Written { get; set; }
+}
