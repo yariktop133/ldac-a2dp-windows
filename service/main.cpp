@@ -131,6 +131,8 @@ int main(int argc, char **argv)
                 break;
             }
             streaming = true;
+            src->Resync();
+            in.clear();  // this read predates START; the source resumes from here
             if (verbose)
                 printf("START\n");
         } else if (streaming && silent) {

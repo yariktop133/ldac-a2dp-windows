@@ -8,6 +8,17 @@
 - **VMware Workstation Pro** (бесплатна для личного использования) или VirtualBox: обе умеют пробрасывать USB-устройство в гостя. Hyper-V для этого не подходит — проброса USB у него нет.
 - Гость: Windows 11 x64. Перед каждой установкой драйвера — **снимок ВМ**.
 
+## Как стенд поднят на этом ноутбуке (22.10.2026)
+
+ВМ `LdacTestVM` в VirtualBox, адаптер **Realtek Bluetooth 5.4 (`0BDA:A728`)** проброшен USB-фильтром, учётная запись `tester` (пароль — `btp/vm-credentials.txt`, вне git). Что пришлось обойти:
+
+1. **Hyper-V/VBS на хосте.** VirtualBox поверх Hyper-V (бэкенд NEM) не даёт гостю x2APIC, и Windows 11 25H2 с двумя ядрами не грузится. Отключено: компонент `VirtualMachinePlatform` и `bcdedit /set hypervisorlaunchtype off`, затем перезагрузка (вернуть — `Enable-WindowsOptionalFeature ... VirtualMachinePlatform` и `hypervisorlaunchtype auto`).
+2. **VirtualBox 7.2.x + Windows 11 25H2 с ≥2 vCPU:** WinPE и Windows виснут при загрузке на этом ноутбуке (i5-1155G7) при любых настройках: 2–3 ядра, x2APIC, nested paging, `ExitOptimizationEnabled`, 7.2.22 и 7.2.2. С **1 ядром** всё работает — ВМ работает на одном ядре. Стоит VirtualBox **7.2.2**.
+3. **Установщик Windows 11 25H2** отказывается ставиться на 1 ядро, `LabConfig` это не обходит. Поэтому Windows развёрнута вручную из WinPE (Shift+F10 на экране установщика): `diskpart` (clean → GPT → EFI 200 МБ → MSR → Windows), `dism /Apply-Image ... /Index:4`, `bcdboot W:\Windows /s S: /f UEFI`, `bcdedit /store ... testsigning on`, копирование `unattend.xml` (учётная запись, автовход, гостевые дополнения при первом входе) со второго виртуального привода (VISO). Разметка, сделанная `diskpart` на хосте, не подошла: `specialize` падал с «File is not system store».
+4. Secure Boot выключен (хранилище UEFI без ключей), `testsigning` включён — на рабочем столе «Тестовый режим».
+
+Управление гостем с хоста — `VBoxManage guestcontrol LdacTestVM run --username tester --passwordfile ...`.
+
 ## 2. Подготовка гостя (один раз)
 
 1. Пробросить адаптер: VMware → VM → Removable Devices → адаптер → Connect (лучше включить «подключать автоматически»).

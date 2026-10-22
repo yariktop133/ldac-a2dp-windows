@@ -130,7 +130,11 @@ public:
         }
     }
 
-    unsigned QueueDepth() const override { return (unsigned)pending_.size(); }
+    // TX queue depth for LDAC ABR: packets waiting behind the one being handed to
+    // the controller. libldac only raises quality after 0.5 s with a depth of
+    // exactly 0, and a live stream always has one packet in flight, so counting
+    // it would pin the encoder at its lowest step (seen on hardware: stuck at MQ).
+    unsigned QueueDepth() const override { return pending_.empty() ? 0u : (unsigned)pending_.size() - 1; }
 
     uint16_t Delay100us() override
     {

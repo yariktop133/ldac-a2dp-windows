@@ -3,6 +3,8 @@ project(ldac_a2dp C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+# Static CRT: tools and the service run on test machines without the VC++ redistributable.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)

@@ -61,6 +61,9 @@ public:
     // Appends interleaved float frames that became available, waiting up to
     // timeoutMs. Returns false at the end of a finite source.
     virtual bool Read(std::vector<float> &out, int timeoutMs) = 0;
+    // Called after the stream (re)starts, which can block for a moment: forget
+    // the backlog that built up meanwhile instead of bursting it into the link.
+    virtual void Resync() {}
 };
 
 std::unique_ptr<AudioSource> MakeLoopbackSource(const std::string &endpointMatch);
@@ -91,7 +94,10 @@ public:
     // Encodes interleaved float frames (link.channels wide); every finished
     // media packet (RTP + payload header + frames) is appended to `packets`.
     virtual void Encode(const float *frames, size_t count, std::vector<std::vector<uint8_t>> &packets) = 0;
-    virtual void Tick(unsigned txQueueDepth) { (void)txQueueDepth; }  // every kAbrIntervalMs
+    // Every kAbrIntervalMs. Not suspended right after START: the link takes ~1 s
+    // to ramp up, and holding the bit rate through it overflowed the queue on
+    // hardware (dropped packets), while ABR stepping down drops nothing.
+    virtual void Tick(unsigned txQueueDepth) { (void)txQueueDepth; }
     virtual std::string Describe() const = 0;  // configuration, for the log
     virtual std::string Quality() const = 0;   // current quality step, for the log
     virtual int NominalKbps() const = 0;

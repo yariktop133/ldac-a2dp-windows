@@ -162,6 +162,43 @@ static void TestLdac()
     CHECK(enc->NominalKbps() < 660);
 }
 
+// ABR after a congested start (seen on hardware): it must climb back once the
+// queue is empty, and a queue that never reaches 0 keeps it at the bottom
+// (why DriverSink does not count the packet in flight).
+static int AbrAfterDrop(unsigned steadyDepth)
+{
+    LinkInfo link;
+    link.codec = "LDAC";
+    link.sampleRate = 96000;
+    link.channels = 2;
+    link.ldacCm = LDAC_CM_STEREO;
+    link.mtu = 679;
+    DeviceSettings s;  // SQ + ABR
+    std::string err;
+    auto enc = MakeLdacEncoder();
+    if (!enc->Init(link, s, err))
+        return -1;
+    std::vector<float> pcm = Sine(1000, 96000, 1920, 2);  // 20 ms per ABR tick
+    std::vector<std::vector<uint8_t>> packets;
+    for (int i = 0; i < 50; i++) {  // 1 s of a full queue
+        enc->Encode(pcm.data(), 1920, packets);
+        enc->Tick(30);
+    }
+    for (int i = 0; i < 3000; i++) {  // 60 s of a steady queue
+        enc->Encode(pcm.data(), 1920, packets);
+        enc->Tick(steadyDepth);
+    }
+    return enc->NominalKbps();
+}
+
+static void TestAbrRecovery()
+{
+    int empty = AbrAfterDrop(0), oneInFlight = AbrAfterDrop(1);
+    printf("ABR after a congested start, 60 s later: queue 0 -> %d kbps, queue 1 -> %d kbps\n", empty, oneInFlight);
+    CHECK(empty == 660);        // back to the chosen SQ, not above
+    CHECK(oneInFlight == 330);  // never recovers: depth 1 is not "empty" for libldac
+}
+
 static void TestSbc()
 {
     LinkInfo link;
@@ -196,6 +233,7 @@ int main()
     TestResampler();
     TestSettings();
     TestLdac();
+    TestAbrRecovery();
     TestSbc();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

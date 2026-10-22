@@ -163,6 +163,16 @@ public:
         return true;
     }
 
+    // Live audio: drop what the endpoint captured while we were not reading.
+    void Resync() override
+    {
+        BYTE *data;
+        UINT32 frames = 0;
+        DWORD flags = 0;
+        while (capture_->GetBuffer(&data, &frames, &flags, nullptr, nullptr) == S_OK)
+            capture_->ReleaseBuffer(frames);
+    }
+
 private:
     std::string match_, name_;
     ComPtr<IAudioClient> client_;
@@ -211,6 +221,15 @@ public:
         AppendFloat(raw.data(), (UINT32)got, &fmt_, wav_.format == WAV_F32, channels_, out);
         delivered_ += got;
         return true;
+    }
+
+    // A file loses nothing: move the playback clock so it continues from the
+    // last delivered frame instead of catching up in one go.
+    void Resync() override
+    {
+        start_ = std::chrono::steady_clock::now() -
+                 std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                     std::chrono::duration<double>((double)delivered_ / wav_.sample_rate));
     }
 
 private:

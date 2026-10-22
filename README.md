@@ -61,7 +61,7 @@ build\ldacsvc.exe --address 12:34:56:78:9A:BC --source loopback --sink null --li
 - [x] Этап 6 (часть): утилита настроек, формат настроек — `docs/settings-format.md`.
 - [x] Этап 1: эталонная сессия LDAC с JBL Live 780NC через `btvs` — `docs/jbl-live-780nc.md`.
 - [x] Проверка декодированием: LDAC — открытым libldacdec (собирается MSVC скриптом `tools/ldacverify`), SBC — ffmpeg; результаты в `docs/verification.md`.
-- [ ] Этап 4: KMDF-драйвер `driver/LdacA2dp` собирается (Code Analysis и InfVerif чистые), на железе не проверен. Есть: исходящие и входящие (сервер PSM 0x19, фильтр по адресу наушников) каналы AVDTP, асинхронное автоподключение при старте, IOCTL для службы с правами чтения/записи и счётчиками пакетов.
+- [x] Этап 4: KMDF-драйвер `driver/LdacA2dp` работает на железе (тестовая ВМ, адаптер Realtek 5.4, JBL Live 780NC, 22.10.2026): сам согласует LDAC 96 кГц / MTU 679 / задержка 150 мс, звук от `ldacsvc` слышен в наушниках, 3000 пакетов без потерь. ABR на канале VirtualBox держит SQ–Q0.
 - [x] Служба кодирования `ldacsvc`: LDAC и SBC, проверена с имитацией канала на WAV и живом звуке (loopback), статус отображается в утилите; SBC сверен декодером ffmpeg (SNR 60.9 дБ). Тесты `service_tests`. С драйвером на железе не проверена.
 - [ ] Тестовый стенд: скрипты и инструкция готовы (`docs/test-stand.md`), нужен USB-адаптер и ВМ.
 - [ ] Этап 5: звук — варианты и рекомендация в `docs/stage5-audio-options.md`. Alternative A2DP устроен иначе, чем в нашем плане: `AltA2DP.sys` сам регистрирует KS-интерфейсы Wave/Topology на Bluetooth-устройстве (см. `docs/jbl-live-780nc.md`), без отдельного виртуального устройства.
