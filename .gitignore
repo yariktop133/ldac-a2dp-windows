@@ -6,3 +6,4 @@ ui/**/obj/
 captures/
 btp/
 __pycache__/
+driver/packages/

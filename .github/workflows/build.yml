@@ -27,10 +27,11 @@ jobs:
   driver:
     name: KMDF driver
     runs-on: windows-latest
-    # Needs a WDK with ACX 1.1 on the runner image; not guaranteed, so it may not block the build.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
+      # The runner image has no WDK; take it (with ACX) from NuGet, see driver/Directory.Build.props.
+      - name: Restore the WDK from NuGet
+        run: nuget restore driver\packages.config -PackagesDirectory driver\packages
       - name: Build (build_driver.cmd Release)
         shell: cmd
         run: build_driver.cmd Release
