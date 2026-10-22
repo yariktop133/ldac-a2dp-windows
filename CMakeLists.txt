@@ -77,7 +77,7 @@ add_library(ldacsvc_core STATIC
     service/winsvc.cpp tools/ldacenc/wav.c)
 target_compile_features(ldacsvc_core PUBLIC cxx_std_17)
 target_compile_definitions(ldacsvc_core PUBLIC UNICODE _UNICODE NOMINMAX)
-target_link_libraries(ldacsvc_core PUBLIC ldacBT_abr ldacBT_enc sbc_enc avdtp ole32 cfgmgr32 advapi32 bthprops)
+target_link_libraries(ldacsvc_core PUBLIC ldacBT_abr ldacBT_enc sbc_enc avdtp ole32 cfgmgr32 advapi32 bthprops avrt)
 if(MSVC)
     target_compile_options(ldacsvc_core PUBLIC /W4 /utf-8)
 endif()

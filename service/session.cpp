@@ -4,6 +4,7 @@
 #include "svc.h"
 
 #include <windows.h>
+#include <avrt.h>
 
 #include <algorithm>
 #include <chrono>
@@ -25,6 +26,15 @@ const char *SessionEndName(SessionEnd e)
 
 SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, std::string &err)
 {
+    // Real-time audio work: MMCSS keeps ordinary load from starving the loop
+    // (seen on the stand: 250-500 ms stalls, then a burst beyond the 32 packets
+    // the driver queues). Released on every exit path.
+    DWORD mmTask = 0;
+    struct MmcssScope {
+        HANDLE h;
+        ~MmcssScope() { if (h) AvRevertMmThreadCharacteristics(h); }
+    } mmcss{ AvSetMmThreadCharacteristicsW(L"Pro Audio", &mmTask) };
+
     uint64_t addr = ParseAddress(o.address);
     std::string address = o.address.empty() && o.sinkKind == "null" ? "00:00:00:00:00:00" : o.address;
 
@@ -133,9 +143,9 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
     auto startedAt = start, nextTrace = start;  // -v: queue trace for 3 s after START
     double maxGapMs = 0;
     unsigned maxQueue = 0;
-    // While the endpoint stream is open (an application paused, between
-    // sounds) the A2DP stream stays started and silence keeps the link busy:
-    // an idle link stalls again for ~0.5 s on the next sound (see warm-up).
+    // While started the link never idles: gaps in the audio (a paused but open
+    // endpoint stream, an application reopening it, the 3 s before SUSPEND) are
+    // filled with silence, as an idle link stalls for ~0.5 s on the next sound.
     auto lastFeed = start;
     bool wasHeld = false;
 
@@ -162,7 +172,10 @@ SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, st
             printf("%.1fs endpoint stream %s\n", std::chrono::duration<double>(now - start).count(),
                    held ? "opened" : "closed");
         wasHeld = held;
-        if (streaming && !real && held && now - lastData > std::chrono::milliseconds(50)) {
+        // Any gap while started is filled, not only a paused stream: an application
+        // reopening its stream (seen in the stress run) leaves a short gap, and an
+        // idle link then stalls on the audio that follows, without a warm-up.
+        if (streaming && !real && now - lastData > std::chrono::milliseconds(50)) {
             // Exactly the real pace (a short Read wait lasts a whole 15.6 ms
             // timer tick, so fixed small steps fell behind and the sink ran
             // dry, stuttering on resume), but without refilling the 50 ms it
