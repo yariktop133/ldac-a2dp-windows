@@ -1,0 +1,32 @@
+LDAC A2DP for Windows
+Copyright 2026 yariktop133 and contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes third-party software:
+
+* libldac (third_party/libldac) - the LDAC encoder and adaptive bit rate
+  library from the Android Open Source Project, external/libldac,
+  commit eeee1a3f. Copyright Sony Corporation. Apache License 2.0
+  (third_party/libldac/LICENSE). Its NOTICE reads:
+
+      Taking the certification process is required to use LDAC in your
+      products. For the detail of certification process, see
+      https://www.sony.net/Products/LDAC/aosp/
+
+* SBC encoder (third_party/sbc_encoder) - from the Android Open Source
+  Project, platform/packages/modules/Bluetooth, system/embdrv/sbc/encoder.
+  Copyright 1999-2012 Broadcom Corporation. Apache License 2.0
+  (third_party/sbc_encoder/LICENSE, third_party/sbc_encoder/SOURCE.md).
+
+The ACX render circuit and WaveRT stream timing in driver/LdacA2dp/audio.c
+follow the structure of the Windows-driver-samples ACX AudioCodec sample
+(Microsoft, MIT License); no sample code is included.
+
+tools/ldacverify fetches and builds libldacdec (an independent LDAC decoder)
+only to check our output; it is not part of this repository or of the
+product.
+
+LDAC is a trademark of Sony Corporation. JBL is a trademark of HARMAN
+International. Windows is a trademark of Microsoft Corporation. This project
+is not affiliated with or endorsed by any of them.

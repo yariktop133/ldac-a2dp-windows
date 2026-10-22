@@ -1,0 +1,12 @@
+# Sources are stored with LF; Windows-only scripts and project files check out with CRLF.
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.inx text eol=crlf
+*.inf text eol=crlf
+*.vcxproj text eol=crlf
+*.sln text eol=crlf
+*.sh text eol=lf
+*.wav binary
+*.pcap binary

@@ -1,6 +1,68 @@
-# LDAC A2DP source for Windows
+# LDAC A2DP for Windows
 
-Своя замена штатного A2DP-источника Windows (`BthA2dp`): AVDTP-сигналинг, кодирование LDAC (libldac из AOSP) и SBC как запасной вариант.
+An open-source replacement for the Windows Bluetooth audio source (`BthA2dp`) that streams **LDAC** (Sony's hi-res Bluetooth codec, up to 990 kbit/s, 96 kHz / 24-bit) to headphones, with SBC as the fallback.
+
+**English** · [Русский](#русский)
+
+## What it does
+
+- **Kernel driver** (`driver/LdacA2dp`, KMDF):
+  - takes over the headphones' A2DP device and runs AVDTP over L2CAP itself (stream setup, START/SUSPEND, reconnects);
+  - is also the Windows audio endpoint "Headphones (*your headphones*)" (an ACX render circuit);
+  - implements AVRCP: **absolute volume** (the Windows slider sets the headphones' volume, no loss of PCM resolution) and the headphones' **buttons** as media keys.
+- **Encoder service** `LdacSvc` (user mode): reads what Windows renders to that endpoint and encodes it with libldac (LDAC, with adaptive bit rate) or SBC. It runs as a Windows service with reconnects and applies settings on the fly.
+- **Settings utility** `LdacConfig` (WPF): codec, sample rates, quality, channel mode, plus the live state (codec, bit rate, ABR step, volume, AVRCP, service).
+- **Installer**: one package with `install.cmd` / `uninstall.cmd`. Uninstalling returns the headphones to the Windows driver (or to whatever A2DP driver they used before).
+
+## Status
+
+Working and in daily use with **JBL Live 780NC** on Windows 11. Tested on a VirtualBox test stand and on a laptop with an Intel adapter:
+- an hour of stress under Driver Verifier;
+- sleep (Modern Standby) and headphones switched off mid-stream;
+- a side-by-side comparison with Alternative A2DP (`docs/real-machine.md`).
+
+Other LDAC headphones need their hardware ID in the INF (`driver/LdacA2dp/LdacA2dp.inx`). Their AVDTP/AVRCP behaviour may differ, so check them on the test stand first.
+
+## ⚠ Test-signed driver
+
+The driver is signed with a self-made test certificate. Since Windows 10 1607 a kernel driver only loads with Secure Boot on if Microsoft has signed it (attestation signing needs an EV code-signing certificate). To use this build you have to:
+
+1. turn Secure Boot off in UEFI;
+2. run `bcdedit /set testsigning on` as administrator and reboot;
+3. run `install.cmd` from the package.
+
+The installer never changes boot settings itself. Test mode lowers boot-time protection, and some anti-cheat software refuses to run with it. Undo: uninstall, `bcdedit /set testsigning off`, Secure Boot on. LDAC is Sony's; using it in products requires Sony's certification (see NOTICE).
+
+## Building
+
+Requirements:
+- Windows 11;
+- Visual Studio 2022 or later with "Desktop development with C++";
+- for the driver, the WDK 10.0.26100 or later with ACX 1.1;
+- for the utility, the .NET 10 SDK.
+
+```bat
+build.cmd                     :: protocol core, codecs, service, tests (CMake + Ninja)
+build_driver.cmd Release      :: the KMDF driver
+powershell -ExecutionPolicy Bypass -File tools\package\make-package.ps1   :: everything + test signature -> build\package\*.zip
+```
+
+Documentation (in Russian):
+- `docs/stage5-audio-options.md` — architecture;
+- `docs/jbl-live-780nc.md` — the reference capture and the AVRCP exchange;
+- `docs/test-stand.md` — the test VM and the stress test;
+- `docs/real-machine.md` — the laptop and the comparison;
+- `docs/settings-format.md` — the settings and status files.
+
+## License
+
+Apache License 2.0 (see `LICENSE`). Third-party code: libldac (AOSP, Apache 2.0) and the AOSP SBC encoder (Apache 2.0), see `NOTICE`. Not affiliated with Sony, HARMAN/JBL or Microsoft.
+
+---
+
+## Русский
+
+Своя замена штатного A2DP-источника Windows (`BthA2dp`): AVDTP-сигналинг, кодирование LDAC (libldac из AOSP) и SBC как запасной вариант, своё звуковое устройство и AVRCP (абсолютная громкость, кнопки наушников). Драйвер подписан тестовым сертификатом, поэтому нужен тестовый режим Windows; подробности выше и в `installer/README.txt`.
 
 ## Структура
 
@@ -9,13 +71,14 @@
 | `avdtp/` | Ядро протоколов на C без кучи и CRT: кадры AVDTP, фрагментация, возможности, LDAC/SBC, автомат источника, медиапакеты; AVRCP/AVCTP (`avrcp.c`). Те же исходники собираются в KMDF-драйвер. |
 | `avdtp/tests/` | Юнит-тесты, симулятор наушников (`sim_sink`, повторяет JBL Live 780NC) и повтор реальной сессии (`test_replay`). |
 | `driver/LdacA2dp/` | KMDF-драйвер наушников: A2DP (L2CAP через BRB, ядро AVDTP, звуковое устройство ACX, IOCTL для службы кодирования) и AVRCP (громкость, кнопки через VHF). INF для JBL Live 780NC. |
-| `service/` | `ldacsvc`: служба кодирования — WASAPI loopback или WAV → ресемплинг → LDAC + ABR или SBC → медиапакеты в драйвер (IOCTL) или в имитацию канала; читает `settings.json`, пишет статус для утилиты. |
+| `service/` | `ldacsvc` / служба `LdacSvc`: звук с конечной точки драйвера (или WASAPI loopback, WAV) → ресемплинг → LDAC + ABR или SBC → медиапакеты в драйвер (IOCTL) или в имитацию канала; читает `settings.json`, пишет статус для утилиты. |
 | `tools/hci/` | Разбор журналов Bluetooth: `btvs` → pcap, ETL → btsnoop, декодер L2CAP/AVDTP/медиа. |
 | `tools/ldacenc/` | WAV → LDAC-пакеты A2DP, симуляция радиоканала и ABR. |
 | `ui/LdacConfig/` | Утилита настроек (WPF, .NET 10, тема Fluent): кодек, частоты, качество, выдержка после звука; текущее состояние — кодек, качество, громкость, AVRCP, служба. |
 | `third_party/libldac` | AOSP `external/libldac` (Apache-2.0), коммит `eeee1a3f`. |
 | `third_party/sbc_encoder` | SBC-кодер AOSP (`system/embdrv/sbc/encoder`, Apache-2.0), см. `SOURCE.md`. |
-| `tools/stand/` | Подпись драйвера тестовым сертификатом, пакет и установка на тестовую ВМ (`docs/test-stand.md`). |
+| `tools/stand/` | Подпись драйвера тестовым сертификатом, тестовая ВМ, нагрузка, замеры (`docs/test-stand.md`). |
+| `tools/package/`, `installer/` | Сборка пакета установки и сам установщик (`install.cmd`, `uninstall.cmd`). |
 | `third_party/compat` | Шимы, чтобы libldac собирался MSVC. |
 
 ## Сборка
@@ -24,13 +87,13 @@
 build.cmd
 ```
 
-Собирает C-часть (CMake + Ninja из Visual Studio 2026) и запускает тесты. Утилита настроек:
+Собирает C-часть (CMake + Ninja из Visual Studio, находится через `vswhere`) и запускает тесты. Утилита настроек:
 
 ```bat
 dotnet build ui\LdacConfig -c Release
 ```
 
-Драйвер (нужны WDK/SDK 10.0.28000 и компонент VS «Windows Driver Kit»), результат — `build\LdacA2dp\<Configuration>\LdacA2dp\` (`.sys`, `.inf`, `.cat`, без подписи):
+Драйвер (нужны WDK 10.0.26100+ с ACX 1.1 и компонент VS «Windows Driver Kit»), результат — `build\LdacA2dp\<Configuration>\LdacA2dp\` (`.sys`, `.inf`, `.cat`, без подписи):
 
 ```bat
 build_driver.cmd Debug

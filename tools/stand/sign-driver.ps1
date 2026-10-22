@@ -21,11 +21,13 @@ $ErrorActionPreference = 'Stop'
 
 $root = Resolve-Path "$PSScriptRoot\..\.."
 $package = Join-Path $root "build\LdacA2dp\$Configuration\LdacA2dp"
-$signtool = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.28000.0\x64\signtool.exe'
+# the newest Windows SDK's signtool
+$signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+    Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1 -ExpandProperty FullName
 $subject = 'CN=LdacA2dp Test'
 
 if (-not (Test-Path "$package\LdacA2dp.sys")) { throw "No package at ${package}: run build_driver.cmd $Configuration first." }
-if (-not (Test-Path $signtool)) { throw "signtool not found: $signtool" }
+if (-not $signtool) { throw 'signtool not found: install the Windows SDK' }
 
 $cert = Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Subject -eq $subject -and $_.HasPrivateKey } |
     Sort-Object NotAfter -Descending | Select-Object -First 1

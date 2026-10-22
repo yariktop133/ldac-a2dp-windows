@@ -7,7 +7,8 @@ set -e
 export MSYS_NO_PATHCONV=1
 VB="${VBOXMANAGE:-/c/Program Files/Oracle/VirtualBox/VBoxManage.exe}"
 VM="${VM:-LdacTestVM}"
-GC="--username tester --passwordfile C:/projects/driver/btp/vm-pw.tmp"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd -W 2>/dev/null || pwd)"
+GC="--username tester --passwordfile $ROOT/btp/vm-pw.tmp"
 cp "$1" "${TMP:-/tmp}/admin.ps1"
 "$VB" guestcontrol "$VM" copyto $GC --target-directory C:/stand/ "$(cygpath -w "${TMP:-/tmp}/admin.ps1" 2>/dev/null || echo "${TMP:-/tmp}/admin.ps1")"
 # guestcontrol drops backslashes from arguments: forward slashes only
