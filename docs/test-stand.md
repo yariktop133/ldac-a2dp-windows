@@ -17,7 +17,17 @@
 3. **Установщик Windows 11 25H2** отказывается ставиться на 1 ядро, `LabConfig` это не обходит. Поэтому Windows развёрнута вручную из WinPE (Shift+F10 на экране установщика): `diskpart` (clean → GPT → EFI 200 МБ → MSR → Windows), `dism /Apply-Image ... /Index:4`, `bcdboot W:\Windows /s S: /f UEFI`, `bcdedit /store ... testsigning on`, копирование `unattend.xml` (учётная запись, автовход, гостевые дополнения при первом входе) со второго виртуального привода (VISO). Разметка, сделанная `diskpart` на хосте, не подошла: `specialize` падал с «File is not system store».
 4. Secure Boot выключен (хранилище UEFI без ключей), `testsigning` включён — на рабочем столе «Тестовый режим».
 
-Управление гостем с хоста — `VBoxManage guestcontrol LdacTestVM run --username tester --passwordfile ...`.
+Управление гостем с хоста — `VBoxManage guestcontrol LdacTestVM run --username tester --passwordfile ...`. Такие команды идут без прав администратора, а `guestcontrol` выбрасывает обратные косые черты из аргументов: пути пишутся через `/`.
+
+Шаги с правами администратора идут через задачу планировщика `StandAdmin`. Она запускает `C:\stand\admin.ps1` от SYSTEM, и `tester` может её запускать. Задачу один раз регистрирует `tools\stand\stand-admin-setup.ps1`, запущенный с повышением прав (Win+R → Ctrl+Shift+Enter → UAC). Дальше с хоста:
+
+```sh
+tools/stand/run-admin.sh script.ps1 [секунд ожидания]   # копирует как admin.ps1, запускает, печатает вывод
+```
+
+`tools/stand/stand-status.ps1` в госте показывает файлы стенда, состояние `LdacSvc`, устройство `LdacA2dp` и хвост журнала службы.
+
+У ВМ нет своей звуковой карты: единственная конечная точка — Hands-Free JBL. Поэтому `loopback` в ВМ захватывает её, а для проверок звук берётся из WAV.
 
 ## 2. Подготовка гостя (один раз)
 
@@ -67,8 +77,14 @@ verifier /standard /driver LdacA2dp.sys
    ldacsvc.exe --address 12:34:56:78:9A:BC --source wav:test.wav --sink driver -v
    ```
    или `--source loopback:<имя устройства вывода в ВМ>`. В выводе — согласованный кодек, частота, MTU, задержка; каждую секунду — пакеты/с, битрейт и очередь.
-3. Журнал эфира: `btvs.exe -mode wireshark -remote on` в госте + `tools\hci\pcap_tcp_dump.py`, разбор — `tools\hci\avdtp_dump.py`. Сравнивать с эталоном `docs/jbl-live-780nc.md`.
-4. Логи WDF: в WinDbg `!wdfkd.wdflogdump LdacA2dp`.
+3. Как служба (автозапуск, переподключение, смена настроек на лету):
+   ```bat
+   ldacsvc.exe install --address 12:34:56:78:9A:BC --source wav:C:/stand/tone.wav
+   ldacsvc.exe uninstall
+   ```
+   Журнал — `%ProgramData%\LdacA2dp\ldacsvc.log` (предыдущий запуск — `.log.1`), строка о битрейте раз в минуту.
+4. Журнал эфира: `btvs.exe -mode wireshark -remote on` в госте + `tools\hci\pcap_tcp_dump.py`, разбор — `tools\hci\avdtp_dump.py`. Сравнивать с эталоном `docs/jbl-live-780nc.md`.
+5. Логи WDF: в WinDbg `!wdfkd.wdflogdump LdacA2dp`.
 
 ## 6. Что проверить в первую очередь
 
@@ -79,6 +95,8 @@ verifier /standard /driver LdacA2dp.sys
 | Порядок сигнализации | `avdtp_dump.py` | как в эталоне, байт в байт |
 | Наушники открывают AVDTP сами | выключить/включить наушники при установленном драйвере | `SignalingIncoming = 1`, поток согласован |
 | Потеря медиаканала | отойти с наушниками за предел связи | ABORT, `LastError`, повторное подключение |
+| Служба отпускает драйвер | `pnputil /restart-device` при работающей `LdacSvc` | перезапуск без перезагрузки, в журнале «the device is being removed», затем новая сессия |
+| Смена настроек | изменить частоту / качество в утилите | частота: пересогласование потока; качество: новый кодер без разрыва |
 | Нагрузка | `ldacsvc` 30+ минут, Driver Verifier | без утечек и багчеков |
 
 ## 7. Откат

@@ -2,6 +2,12 @@
 //
 //   ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source loopback[:endpoint]|wav:file]
 //           [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]
+//   ldacsvc install [--address ...] [--source ...]   (administrator)
+//   ldacsvc uninstall
+//
+// Without a command it runs one session in the console. `install` registers the
+// LdacSvc service (auto start), which runs sessions forever and reconnects;
+// the options given to `install` go to the service command line.
 //
 // --dump writes the bare codec frames (media packets without RTP and payload
 // headers): raw SBC can be decoded with `ffmpeg -f sbc -i file out.wav`.
@@ -12,12 +18,8 @@
 
 #include <windows.h>
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
+#include <cstdlib>
 
 static std::atomic<bool> g_stop{ false };
 
@@ -31,169 +33,58 @@ static void Usage()
 {
     fprintf(stderr,
             "usage: ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source loopback[:endpoint]|wav:file]\n"
-            "               [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]\n");
+            "               [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]\n"
+            "       ldacsvc install [--address ...] [--source ...]\n"
+            "       ldacsvc uninstall\n");
 }
 
 int main(int argc, char **argv)
 {
-    std::string address, source = "loopback", sinkKind = "driver", link = "0:2000", dumpPath;
-    double seconds = 0;
-    bool verbose = false;
+    SessionOptions o;
+    bool service = false;
+    int first = 1;
+    std::string command = argc > 1 ? argv[1] : "";
+    if (command == "install" || command == "uninstall")
+        first = 2;
+    if (command == "uninstall")
+        return argc == 2 ? ServiceUninstall() : (Usage(), 2);
 
-    for (int i = 1; i < argc; i++) {
+    std::string passThrough;  // for install: the session options, re-quoted
+    for (int i = first; i < argc; i++) {
         std::string a = argv[i];
-        auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
-        if (a == "--address") address = next();
-        else if (a == "--source") source = next();
-        else if (a == "--sink") sinkKind = next();
-        else if (a == "--link") link = next();
-        else if (a == "--seconds") seconds = atof(next().c_str());
-        else if (a == "--dump") dumpPath = next();
-        else if (a == "-v") verbose = true;
+        auto next = [&]() -> std::string {
+            std::string v = i + 1 < argc ? argv[++i] : "";
+            passThrough += " " + a + " \"" + v + "\"";
+            return v;
+        };
+        if (a == "--address") o.address = next();
+        else if (a == "--source") o.source = next();
+        else if (a == "--sink") o.sinkKind = next();
+        else if (a == "--link") o.link = next();
+        else if (a == "--seconds") o.seconds = atof(next().c_str());
+        else if (a == "--dump") o.dumpPath = next();
+        else if (a == "-v") o.verbose = true, passThrough += " -v";
+        else if (a == "--service") service = true;
         else return Usage(), 2;
     }
-    uint64_t addr = ParseAddress(address);
-    if (!address.empty() && !addr)
+    if (!o.address.empty() && !ParseAddress(o.address))
         return fprintf(stderr, "bad --address\n"), 2;
-    if (address.empty() && sinkKind == "null")
-        address = "00:00:00:00:00:00";
+
+    if (command == "install") {
+        if (o.sinkKind != "driver" || o.seconds > 0 || !o.dumpPath.empty())
+            return fprintf(stderr, "install: only --address, --source and -v make sense for the service\n"), 2;
+        return ServiceInstall(passThrough.empty() ? "" : passThrough.substr(1));
+    }
+    if (service)
+        return ServiceDispatch(o);
+
     SetConsoleCtrlHandler(OnCtrl, TRUE);
     SetConsoleOutputCP(CP_UTF8);
-
-    // settings -> preferences
-    DeviceSettings settings;
-    std::string note;
-    LoadSettings(address.empty() ? std::string() : FormatAddress(addr), settings, note);
-    printf("settings: %s\n", note.c_str());
-    a2dp_prefs prefs = ToPrefs(settings);
-
-    // sink: negotiate the stream
-    std::unique_ptr<MediaSink> sink = sinkKind == "null" ? MakeNullSink(link) : MakeDriverSink(addr);
-    LinkInfo info;
     std::string err;
-    if (!sink->Open(prefs, info, err))
-        return fprintf(stderr, "sink: %s\n", err.c_str()), 1;
-    if (address.empty())
-        address = sink->Describe().substr(sink->Describe().rfind(' ') + 1);
-    else
-        address = FormatAddress(addr);
-    printf("link: %s, %s %u Hz %s, MTU %d, delay %.1f ms\n", sink->Describe().c_str(), info.codec.c_str(),
-           info.sampleRate, ChannelModeName(info.ldacCm).c_str(), info.mtu, info.delay100us / 10.0);
-
-    if (info.codec != "SBC" && info.codec != "LDAC")
-        return fprintf(stderr, "encoder: unsupported codec %s\n", info.codec.c_str()), 1;
-    std::unique_ptr<AudioEncoder> enc = info.codec == "SBC" ? MakeSbcEncoder() : MakeLdacEncoder();
-    if (!enc->Init(info, settings, err))
-        return fprintf(stderr, "encoder: %s\n", err.c_str()), 1;
-    printf("encoder: %s\n", enc->Describe().c_str());
-
-    FILE *dump = nullptr;
-    if (!dumpPath.empty() && !(dump = fopen(dumpPath.c_str(), "wb")))
-        return fprintf(stderr, "cannot create %s\n", dumpPath.c_str()), 1;
-
-    // source
-    std::unique_ptr<AudioSource> src;
-    if (source.rfind("wav:", 0) == 0)
-        src = MakeWavSource(source.substr(4));
-    else
-        src = MakeLoopbackSource(source.rfind("loopback:", 0) == 0 ? source.substr(9) : "");
-    if (!src->Start(err))
-        return fprintf(stderr, "source: %s\n", err.c_str()), 1;
-    printf("source: %s\n", src->Describe().c_str());
-
-    Resampler rs(src->Rate(), info.sampleRate, src->Channels());
-    std::vector<float> in, resampled, mapped;
-    std::vector<std::vector<uint8_t>> packets;
-
-    using Clock = std::chrono::steady_clock;
-    auto start = Clock::now(), lastSound = start, nextTick = start, nextReport = start + std::chrono::seconds(1);
-    bool streaming = false, finished = false;
-    unsigned long long sent = 0, dropped = 0, sentBytes = 0, sentAtReport = 0, bytesAtReport = 0;
-    int bitDepth = enc->BitDepth();
-
-    while (!g_stop && !finished) {
-        in.clear();
-        if (!src->Read(in, 5))
-            finished = true;
-        auto now = Clock::now();
-
-        float peak = 0;
-        for (float v : in)
-            peak = std::max(peak, std::fabs(v));
-        if (peak > 1e-4f)
-            lastSound = now;
-        bool silent = now - lastSound > std::chrono::seconds(3);
-
-        // START only while there is audio, SUSPEND after 3 s of silence (as the reference does).
-        if (!streaming && !silent && !in.empty()) {
-            if (!sink->Start(err)) {
-                fprintf(stderr, "sink: %s\n", err.c_str());
-                break;
-            }
-            streaming = true;
-            src->Resync();
-            in.clear();  // this read predates START; the source resumes from here
-            if (verbose)
-                printf("START\n");
-        } else if (streaming && silent) {
-            sink->Suspend();
-            streaming = false;
-            if (verbose)
-                printf("SUSPEND (silence)\n");
-        }
-
-        if (streaming && !in.empty()) {
-            resampled.clear();
-            rs.Process(in.data(), in.size() / src->Channels(), resampled);
-            const float *frames = resampled.data();
-            size_t count = resampled.size() / src->Channels();
-            if (info.channels != src->Channels()) {  // stereo source, mono link
-                mapped.resize(count);
-                for (size_t i = 0; i < count; i++)
-                    mapped[i] = 0.5f * (resampled[2 * i] + resampled[2 * i + 1]);
-                frames = mapped.data();
-            }
-            packets.clear();
-            enc->Encode(frames, count, packets);
-            for (auto &p : packets) {
-                if (dump && p.size() > 13)
-                    fwrite(p.data() + 13, 1, p.size() - 13, dump);  // skip RTP (12) + payload header (1)
-                if (sink->Send(p.data(), p.size())) {
-                    sent++;
-                    sentBytes += p.size();
-                } else {
-                    dropped++;
-                }
-            }
-        }
-        sink->Pump();
-
-        if (now >= nextTick) {
-            enc->Tick(sink->QueueDepth());
-            nextTick += std::chrono::milliseconds(AudioEncoder::kAbrIntervalMs);
-            if (nextTick < now)
-                nextTick = now;
-        }
-        if (now >= nextReport) {
-            double t = std::chrono::duration<double>(now - start).count();
-            WriteStatus(address, info, bitDepth, enc->NominalKbps());
-            printf("%7.1fs %-9s %-4s %4d kbps | %4llu pkt/s %5.0f kbit/s on air | queue %2u | dropped %llu\n", t,
-                   streaming ? "streaming" : "suspended", enc->Quality().c_str(), enc->NominalKbps(),
-                   sent - sentAtReport, (sentBytes - bytesAtReport) * 8 / 1000.0, sink->QueueDepth(), dropped);
-            fflush(stdout);
-            sentAtReport = sent;
-            bytesAtReport = sentBytes;
-            nextReport += std::chrono::seconds(1);
-        }
-        if (seconds > 0 && now - start > std::chrono::duration<double>(seconds))
-            break;
+    SessionEnd end = RunSession(o, g_stop, err);
+    if (end == SessionEnd::Error) {
+        fprintf(stderr, "%s\n", err.c_str());
+        return 1;
     }
-
-    if (streaming)
-        sink->Suspend();
-    if (dump)
-        fclose(dump);
-    ClearStatus(address);
-    printf("done: %llu packets sent, %llu dropped\n", sent, dropped);
     return 0;
 }

@@ -235,6 +235,27 @@ a2dp_prefs ToPrefs(const DeviceSettings &s)
     return p;
 }
 
+bool SameLinkPrefs(const DeviceSettings &a, const DeviceSettings &b)
+{
+    return a.ldac == b.ldac && a.freqMask == b.freqMask && a.cmMask == b.cmMask;
+}
+
+long long SettingsStamp()
+{
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    if (!GetFileAttributesExA((DataRoot() + "\\settings.json").c_str(), GetFileExInfoStandard, &fa))
+        return 0;
+    return (long long)fa.ftLastWriteTime.dwHighDateTime << 32 | fa.ftLastWriteTime.dwLowDateTime;
+}
+
+bool ConfigMatches(const a2dp_prefs &prefs, const LinkInfo &link)
+{
+    if (link.codec != "LDAC")
+        return true;
+    return prefs.allow_ldac && (a2dp_ldac_rate_to_freq(link.sampleRate) & prefs.ldac_freq_mask) &&
+           (link.ldacCm & prefs.ldac_cm_mask);
+}
+
 std::string ChannelModeName(uint8_t cm)
 {
     return cm == LDAC_CM_MONO ? "Mono" : cm == LDAC_CM_DUAL ? "Dual Channel" : "Stereo";

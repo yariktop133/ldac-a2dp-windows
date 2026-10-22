@@ -8,6 +8,7 @@
 // (shown by the same UI). See docs/settings-format.md.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -34,6 +35,10 @@ std::string DataRoot();  // %ProgramData%\LdacA2dp
 bool LoadSettings(const std::string &address, DeviceSettings &out, std::string &note);
 bool ParseSettings(std::string json, const std::string &address, DeviceSettings &out, std::string &note);
 a2dp_prefs ToPrefs(const DeviceSettings &s);
+// Settings that need a new stream configuration (codec, rates, channel modes) when they change.
+bool SameLinkPrefs(const DeviceSettings &a, const DeviceSettings &b);
+// Last write time of settings.json, 0 if there is none.
+long long SettingsStamp();
 
 struct LinkInfo {
     std::string codec;      // "LDAC" or "SBC"
@@ -44,6 +49,11 @@ struct LinkInfo {
     uint16_t delay100us = 0;
     a2dp_sbc sbc{};         // single-choice SBC configuration when codec == "SBC"
 };
+
+// Whether a stream configured elsewhere (by the driver at device start, by the
+// headphones) is acceptable for these preferences. SBC always is: we only get it
+// when LDAC is off or the sink has no LDAC.
+bool ConfigMatches(const a2dp_prefs &prefs, const LinkInfo &link);
 
 void WriteStatus(const std::string &address, const LinkInfo &link, int bitDepth, int kbps);
 void ClearStatus(const std::string &address);
@@ -125,12 +135,44 @@ public:
     virtual unsigned QueueDepth() const = 0;
     virtual uint16_t Delay100us() { return 0; }
     virtual std::string Describe() const = 0;
+    // Polled on every pass of the session loop: false (with the reason) once the
+    // stream or the device is gone.
+    virtual bool Alive(std::string &why) { (void)why; return true; }
+    // Tear the stream down so the next Open negotiates it again.
+    virtual void Disconnect() {}
 };
 
 // address 0: the first LdacA2dp device found
 std::unique_ptr<MediaSink> MakeDriverSink(uint64_t address);
+// AVDTP state (avdtp_src_state) of the LdacA2dp device, -1 if there is none.
+int DriverLinkState(uint64_t address);
 // Simulated radio link: capacity in kbit/s over time ("0:1500,5:400").
 std::unique_ptr<MediaSink> MakeNullSink(const std::string &linkSpec);
 
 uint64_t ParseAddress(const std::string &text);
 std::string FormatAddress(uint64_t address);
+
+// ---- session (session.cpp) ------------------------------------------------------
+
+struct SessionOptions {
+    std::string address;            // empty: the first device
+    std::string source = "loopback";
+    std::string sinkKind = "driver";
+    std::string link = "0:2000";    // simulated link (--sink null)
+    std::string dumpPath;
+    double seconds = 0;             // 0: until stopped
+    int reportSeconds = 1;
+    bool watchSettings = true;      // pick up changes from the settings utility
+    bool verbose = false;
+};
+
+enum class SessionEnd { Finished, Stopped, LinkLost, Reconfigure, Error };
+const char *SessionEndName(SessionEnd e);
+SessionEnd RunSession(const SessionOptions &o, const std::atomic<bool> &stop, std::string &err);
+
+// ---- Windows service (winsvc.cpp) ---------------------------------------------
+
+constexpr wchar_t kServiceName[] = L"LdacSvc";
+int ServiceInstall(const std::string &args);  // args: session options for the service command line
+int ServiceUninstall();
+int ServiceDispatch(const SessionOptions &o);  // called by the SCM with --service

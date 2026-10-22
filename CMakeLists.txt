@@ -72,10 +72,11 @@ target_link_libraries(ldacenc PRIVATE ldacBT_abr ldacBT_enc avdtp)
 # --- encoder service (user mode) --------------------------------------------
 add_library(ldacsvc_core STATIC
     service/settings.cpp service/capture.cpp service/resampler.cpp
-    service/encoder.cpp service/sbc.cpp service/sinks.cpp tools/ldacenc/wav.c)
+    service/encoder.cpp service/sbc.cpp service/sinks.cpp service/session.cpp
+    service/winsvc.cpp tools/ldacenc/wav.c)
 target_compile_features(ldacsvc_core PUBLIC cxx_std_17)
 target_compile_definitions(ldacsvc_core PUBLIC UNICODE _UNICODE NOMINMAX)
-target_link_libraries(ldacsvc_core PUBLIC ldacBT_abr ldacBT_enc sbc_enc avdtp ole32 cfgmgr32)
+target_link_libraries(ldacsvc_core PUBLIC ldacBT_abr ldacBT_enc sbc_enc avdtp ole32 cfgmgr32 advapi32 bthprops)
 if(MSVC)
     target_compile_options(ldacsvc_core PUBLIC /W4 /utf-8)
 endif()

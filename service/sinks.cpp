@@ -5,6 +5,7 @@
 #include <initguid.h>
 #include <cfgmgr32.h>
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <thread>
@@ -26,6 +27,14 @@ public:
 
     ~DriverSink() override
     {
+        CloseDevice();
+        if (notify_)
+            CM_Unregister_Notification(notify_);  // waits for a callback in progress
+        CloseHandle(closed_);
+    }
+
+    void CloseDevice()
+    {
         if (handle_ != INVALID_HANDLE_VALUE) {
             CancelIoEx(handle_, nullptr);
             while (!pending_.empty()) {
@@ -35,13 +44,16 @@ public:
                 pending_.pop_front();
             }
             CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
         }
+        SetEvent(closed_);  // lets a pending query-remove go ahead
     }
 
     bool Open(const a2dp_prefs &prefs, LinkInfo &link, std::string &err) override
     {
         if (!FindDevice(err))
             return false;
+        WatchRemoval();
 
         LDACA2DP_STATUS st;
         if (!Status(st))
@@ -144,7 +156,61 @@ public:
 
     std::string Describe() const override { return describe_; }
 
+    bool Probe(LDACA2DP_STATUS &st)
+    {
+        std::string err;
+        return FindDevice(err) && Status(st);
+    }
+
+    bool Alive(std::string &why) override
+    {
+        if (removing_)
+            return why = "the device is being removed", false;
+        auto now = Clock::now();
+        if (now < nextStatus_)
+            return true;
+        nextStatus_ = now + std::chrono::seconds(1);
+        LDACA2DP_STATUS st;
+        if (!Status(st))
+            return why = "the device stopped answering (error " + std::to_string(GetLastError()) + ")", false;
+        if (st.AvdtpState < AVDTP_SRC_OPEN || st.AvdtpState > AVDTP_SRC_SUSPENDING || !st.MediaMtu)
+            return why = "the stream closed (AVDTP state " + std::to_string(st.AvdtpState) + ", last error 0x" +
+                         Hex(st.LastError) + ")", false;
+        return true;
+    }
+
+    void Disconnect() override
+    {
+        if (handle_ != INVALID_HANDLE_VALUE)
+            Ioctl(IOCTL_LDACA2DP_DISCONNECT, nullptr, 0, nullptr, 0);
+    }
+
 private:
+    // An open handle must not hold up a driver update or the device going away:
+    // on query-remove the session loop sees removing_ and drops the sink, which
+    // closes the handle; the callback waits for that (bounded).
+    void WatchRemoval()
+    {
+        CM_NOTIFY_FILTER f = {};
+        f.cbSize = sizeof(f);
+        f.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEHANDLE;
+        f.u.DeviceHandle.hTarget = handle_;
+        CM_Register_Notification(&f, this, OnDeviceEvent, &notify_);
+    }
+
+    static DWORD CALLBACK OnDeviceEvent(HCMNOTIFICATION, PVOID context, CM_NOTIFY_ACTION action,
+                                        PCM_NOTIFY_EVENT_DATA, DWORD)
+    {
+        auto *self = static_cast<DriverSink *>(context);
+        if (action == CM_NOTIFY_ACTION_DEVICEQUERYREMOVE || action == CM_NOTIFY_ACTION_DEVICEREMOVEPENDING ||
+            action == CM_NOTIFY_ACTION_DEVICEREMOVECOMPLETE) {
+            self->removing_ = true;
+            if (action == CM_NOTIFY_ACTION_DEVICEQUERYREMOVE)
+                WaitForSingleObject(self->closed_, 3000);
+        }
+        return ERROR_SUCCESS;
+    }
+
     struct Pending {
         OVERLAPPED ov{};
         std::vector<uint8_t> data;
@@ -209,6 +275,10 @@ private:
 
     uint64_t address_;
     HANDLE handle_ = INVALID_HANDLE_VALUE;
+    HANDLE closed_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HCMNOTIFICATION notify_ = nullptr;
+    std::atomic<bool> removing_{ false };
+    Clock::time_point nextStatus_ = Clock::now() + std::chrono::seconds(1);
     std::deque<std::unique_ptr<Pending>> pending_;
     std::string describe_;
 };
@@ -310,6 +380,13 @@ private:
 std::unique_ptr<MediaSink> MakeDriverSink(uint64_t address)
 {
     return std::make_unique<DriverSink>(address);
+}
+
+int DriverLinkState(uint64_t address)
+{
+    DriverSink probe(address);
+    LDACA2DP_STATUS st;
+    return probe.Probe(st) ? (int)st.AvdtpState : -1;
 }
 
 std::unique_ptr<MediaSink> MakeNullSink(const std::string &linkSpec)

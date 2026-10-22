@@ -199,6 +199,38 @@ static void TestAbrRecovery()
     CHECK(oneInFlight == 330);  // never recovers: depth 1 is not "empty" for libldac
 }
 
+// The service renegotiates a stream set up elsewhere only when it contradicts the settings.
+static void TestConfigMatches()
+{
+    DeviceSettings s;  // LDAC, all rates, stereo
+    LinkInfo link;
+    link.codec = "LDAC";
+    link.sampleRate = 96000;
+    link.ldacCm = LDAC_CM_STEREO;
+    CHECK(ConfigMatches(ToPrefs(s), link));       // what the driver negotiates at device start
+    link.ldacCm = LDAC_CM_DUAL;
+    CHECK(!ConfigMatches(ToPrefs(s), link));      // channel mode not allowed
+    link.ldacCm = LDAC_CM_STEREO;
+    s.freqMask = LDAC_FREQ_48000;
+    CHECK(!ConfigMatches(ToPrefs(s), link));      // 96 kHz no longer allowed
+    link.sampleRate = 48000;
+    CHECK(ConfigMatches(ToPrefs(s), link));
+    s.ldac = false;
+    CHECK(!ConfigMatches(ToPrefs(s), link));      // SBC chosen, LDAC running
+    link.codec = "SBC";
+    CHECK(ConfigMatches(ToPrefs(s), link));
+    s.ldac = true;
+    CHECK(ConfigMatches(ToPrefs(s), link));       // SBC: the sink may have no LDAC, keep it
+
+    DeviceSettings a, b;
+    b.eqmid = 0;
+    b.adaptive = false;
+    b.bits24 = false;
+    CHECK(SameLinkPrefs(a, b));                   // encoder-only changes keep the stream
+    b.cmMask = LDAC_CM_DUAL;
+    CHECK(!SameLinkPrefs(a, b));
+}
+
 static void TestSbc()
 {
     LinkInfo link;
@@ -234,6 +266,7 @@ int main()
     TestSettings();
     TestLdac();
     TestAbrRecovery();
+    TestConfigMatches();
     TestSbc();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
