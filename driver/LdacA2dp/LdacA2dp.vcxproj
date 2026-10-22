@@ -27,6 +27,11 @@
     <ConfigurationType>Driver</ConfigurationType>
     <DriverType>KMDF</DriverType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
+    <!-- ACX 1.1 (Windows 11 22H2+) needs KMDF 1.31 -->
+    <KMDF_VERSION_MAJOR>1</KMDF_VERSION_MAJOR>
+    <KMDF_VERSION_MINOR>31</KMDF_VERSION_MINOR>
+    <ACX_VERSION_MAJOR>1</ACX_VERSION_MAJOR>
+    <ACX_VERSION_MINOR>1</ACX_VERSION_MINOR>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
     <UseDebugLibraries>true</UseDebugLibraries>
@@ -47,12 +52,17 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>..\..\avdtp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\avdtp\include;$(DDK_INC_PATH)\acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>ACX_VERSION_MAJOR=$(ACX_VERSION_MAJOR);ACX_VERSION_MINOR=$(ACX_VERSION_MINOR);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
+    <Link>
+      <AdditionalDependencies>acx\km\$(ACX_VERSION_MAJOR).$(ACX_VERSION_MINOR)\acxstub.lib;ksguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
     <Inf>
-      <TimeStamp>0.1.0.0</TimeStamp>
+      <!-- grows with every build, so pnputil replaces an installed test build of the same day -->
+      <TimeStamp>0.2.$([System.DateTime]::UtcNow.DayOfYear).$([System.DateTime]::UtcNow.ToString("HHmm"))</TimeStamp>
       <!-- UTC date: with stampinf's local date inf2cat rejects DriverVer as "in the future"
            during the hours when local time is a day ahead of UTC. -->
       <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
@@ -67,6 +77,7 @@
     <ClCompile Include="l2cap.c" />
     <ClCompile Include="avdtp_glue.c" />
     <ClCompile Include="ioctl.c" />
+    <ClCompile Include="audio.c" />
     <!-- shared AVDTP / A2DP core, the same sources the user-mode tests exercise -->
     <ClCompile Include="..\..\avdtp\src\avdtp_msg.c" />
     <ClCompile Include="..\..\avdtp\src\a2dp_codec.c" />

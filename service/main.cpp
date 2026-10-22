@@ -1,6 +1,6 @@
 // ldacsvc - see svc.h.
 //
-//   ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source loopback[:endpoint]|wav:file]
+//   ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source endpoint|loopback[:name]|wav:file]
 //           [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]
 //   ldacsvc install [--address ...] [--source ...]   (administrator)
 //   ldacsvc uninstall
@@ -11,6 +11,10 @@
 //
 // --dump writes the bare codec frames (media packets without RTP and payload
 // headers): raw SBC can be decoded with `ffmpeg -f sbc -i file out.wav`.
+//
+// Debugging: -v adds per-second gap/queue figures and a 50 ms queue trace for
+// 3 s after START; --pcm-dump file writes the raw float PCM from the source
+// (and file.txt: ms, frames, streaming, warming, rate per block).
 //
 // --sink null runs the whole pipeline against a simulated radio link, so the
 // encoder, ABR and status reporting can be checked without the driver.
@@ -32,7 +36,7 @@ static BOOL WINAPI OnCtrl(DWORD)
 static void Usage()
 {
     fprintf(stderr,
-            "usage: ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source loopback[:endpoint]|wav:file]\n"
+            "usage: ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source endpoint|loopback[:name]|wav:file]\n"
             "               [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]\n"
             "       ldacsvc install [--address ...] [--source ...]\n"
             "       ldacsvc uninstall\n");
@@ -63,6 +67,7 @@ int main(int argc, char **argv)
         else if (a == "--link") o.link = next();
         else if (a == "--seconds") o.seconds = atof(next().c_str());
         else if (a == "--dump") o.dumpPath = next();
+        else if (a == "--pcm-dump") o.pcmDumpPath = next();
         else if (a == "-v") o.verbose = true, passThrough += " -v";
         else if (a == "--service") service = true;
         else return Usage(), 2;

@@ -3,13 +3,15 @@
 ;
 ; Binds by full hardware ID (service UUID + DeviceID VID/PID), which outranks the
 ; generic BTHENUM\{0000110b-...} match used by BthA2dp and Alternative A2DP.
+; The device is also the headphones' audio endpoint (ACX render circuit
+; "Headphones0"), so it lives in the MEDIA class like Alternative A2DP.
 ; Test machines only until the driver is signed: requires "bcdedit /set testsigning on".
 ;
 
 [Version]
 Signature   = "$WINDOWS NT$"
-Class       = Bluetooth
-ClassGuid   = {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider    = %ManufacturerName%
 CatalogFile = LdacA2dp.cat
 DriverVer   =
@@ -25,9 +27,9 @@ DefaultDestDir = 13
 LdacA2dp.sys = 1,,
 
 [Manufacturer]
-%ManufacturerName% = LdacA2dp,NT$ARCH$.10.0...22000
+%ManufacturerName% = LdacA2dp,NT$ARCH$.10.0...22621
 
-[LdacA2dp.NT$ARCH$.10.0...22000]
+[LdacA2dp.NT$ARCH$.10.0...22621]
 ; JBL Live 780NC (DeviceID VID 0x02B0 from the SIG namespace, PID 0x0000)
 %LdacA2dp.DeviceDesc% = LdacA2dp_Device, BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}_VID&000102b0_PID&0000
 
@@ -53,8 +55,36 @@ KmdfService = LdacA2dp, LdacA2dp_wdfsect
 [LdacA2dp_wdfsect]
 KmdfLibraryVersion = $KMDFVERSION$
 
+; ---- audio endpoint: render interfaces of the ACX circuit "Headphones0" ----
+
+[LdacA2dp_Device.NT.Interfaces]
+AddInterface = %KSCATEGORY_AUDIO%,    %KSNAME_Headphones%, LdacA2dp_Headphones
+AddInterface = %KSCATEGORY_RENDER%,   %KSNAME_Headphones%, LdacA2dp_Headphones
+AddInterface = %KSCATEGORY_REALTIME%, %KSNAME_Headphones%, LdacA2dp_Headphones
+
+[LdacA2dp_Headphones]
+AddReg = LdacA2dp_Headphones.AddReg
+
+[LdacA2dp_Headphones.AddReg]
+HKR,,CLSID,,%Proxy.CLSID%
+HKR,,FriendlyName,,%LdacA2dp.Headphones.szPname%
+; event-driven (pull) mode for the audio engine
+HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
+HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+
 [Strings]
+; non-localizable
+KSNAME_Headphones   = "Headphones0"
+Proxy.CLSID         = "{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
+KSCATEGORY_AUDIO    = "{6994AD04-93EF-11D0-A3CC-00A0C9223196}"
+KSCATEGORY_RENDER   = "{65E8773E-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_REALTIME = "{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
+KSNODETYPE_ANY      = "{00000000-0000-0000-0000-000000000000}"
+PKEY_AudioEndpoint_Association               = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2"
+PKEY_AudioEndpoint_Supports_EventDriven_Mode = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},7"
+
 ManufacturerName     = "LDAC A2DP Project"
 DiskName             = "LDAC A2DP Installation Disk"
 LdacA2dp.DeviceDesc  = "LDAC A2DP Source"
 LdacA2dp.SvcDesc     = "LDAC A2DP Source Profile Driver"
+LdacA2dp.Headphones.szPname = "LDAC A2DP"

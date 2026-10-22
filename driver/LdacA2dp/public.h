@@ -29,6 +29,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_LDACA2DP,
 #define IOCTL_LDACA2DP_SUSPEND    LDACA2DP_IOCTL(3, FILE_WRITE_ACCESS)
 #define IOCTL_LDACA2DP_GET_STATUS LDACA2DP_IOCTL(4, FILE_READ_ACCESS)  /* out: LDACA2DP_STATUS */
 #define IOCTL_LDACA2DP_SEND_MEDIA LDACA2DP_IOCTL(5, FILE_WRITE_ACCESS) /* in: one media packet */
+#define IOCTL_LDACA2DP_READ_PCM   LDACA2DP_IOCTL(6, FILE_READ_ACCESS)  /* out: LDACA2DP_PCM_HEADER + PCM */
 
 #define LDACA2DP_MAX_INFLIGHT_MEDIA 32
 
@@ -64,6 +65,32 @@ typedef struct _LDACA2DP_STATUS {
     INT32 LastError;          /* NTSTATUS of the last failed channel operation */
     UINT64 MediaPacketsSent;
     UINT64 MediaPacketsFailed; /* rejected by the driver (state, size, queue full) or failed in the controller */
+    UINT32 PcmSampleRate;     /* endpoint format of the current (or last) render stream, 0 if none yet */
+    UINT16 PcmChannels;
+    UINT16 PcmBitsPerSample;
+    UINT8 PcmRunning;         /* an application stream is running on the endpoint */
+    UINT8 Reserved2[3];
+    UINT32 PcmBuffered;       /* bytes waiting for READ_PCM */
+    UINT64 PcmDroppedBytes;   /* overwritten before anyone read them */
 } LDACA2DP_STATUS;
+
+/*
+ * Audio rendered to the driver's Windows endpoint (ACX, "Headphones"). Every
+ * READ_PCM returns one header followed by whole frames in the endpoint format;
+ * it waits while nothing has been rendered since the last read. The driver
+ * keeps about 330 ms: if nobody reads, the oldest audio is dropped and the next
+ * header carries LDACA2DP_PCM_DISCONTINUITY.
+ */
+#define LDACA2DP_PCM_FLOAT         0x0001 /* IEEE float samples, else signed integer */
+#define LDACA2DP_PCM_DISCONTINUITY 0x0002 /* audio was dropped or the format changed before this block */
+
+typedef struct _LDACA2DP_PCM_HEADER {
+    UINT32 SampleRate;
+    UINT16 Channels;
+    UINT16 BitsPerSample;     /* container size */
+    UINT16 ValidBits;
+    UINT16 Flags;
+    UINT32 Bytes;             /* PCM bytes after the header */
+} LDACA2DP_PCM_HEADER;
 
 #endif /* LDACA2DP_PUBLIC_H */

@@ -9,8 +9,13 @@
 #pragma once
 
 #include <ntddk.h>
-#include <wdf.h>
 #include <initguid.h>
+#include <windef.h>
+#include <mmsystem.h>
+#include <ks.h>
+#include <ksmedia.h>
+#include <wdf.h>
+#include <acx.h>
 #include <ntstrsafe.h>
 #include <bthdef.h>
 #include <ntintsafe.h>
@@ -75,6 +80,19 @@ typedef struct _DEVICE_CONTEXT {
     L2CAP_CHANNEL Sig;
     L2CAP_CHANNEL Media;
 
+    /* audio endpoint (audio.c): render circuit and the PCM handed to the service */
+    ACXCIRCUIT Render;
+    WDFSPINLOCK PcmLock;       /* protects the Pcm* fields */
+    PUCHAR PcmRing;
+    ULONG PcmRingSize;
+    ULONG PcmReadPos;
+    ULONG PcmCount;
+    LDACA2DP_PCM_HEADER PcmFormat; /* Bytes unused; Flags carries a pending discontinuity */
+    ULONG PcmBlockAlign;
+    BOOLEAN PcmRunning;
+    UINT64 PcmDroppedBytes;
+    WDFQUEUE PcmReadQueue;     /* manual: READ_PCM waiting for audio */
+
     WDFREQUEST SigReadRequest;
     struct _BRB_L2CA_ACL_TRANSFER SigReadBrb;
     UCHAR SigReadBuffer[LDACA2DP_SIG_READ_SIZE];
@@ -124,6 +142,13 @@ NTSTATUS L2capSendSignal(_In_ PDEVICE_CONTEXT Ctx, _In_reads_bytes_(Length) cons
 NTSTATUS L2capSendMedia(_In_ PDEVICE_CONTEXT Ctx, _In_ WDFREQUEST Request, _In_reads_bytes_(Length) PVOID Data,
                         _In_ size_t Length);
 VOID L2capStartSignalReader(_In_ PDEVICE_CONTEXT Ctx);
+
+/* audio.c */
+#define LDACA2DP_PCM_RING_SIZE (256 * 1024) /* ~330 ms at 96 kHz / 32-bit stereo */
+_IRQL_requires_(PASSIVE_LEVEL) NTSTATUS AudioCreate(_In_ PDEVICE_CONTEXT Ctx);
+VOID AudioReadPcm(_In_ PDEVICE_CONTEXT Ctx, _In_ WDFREQUEST Request);
+VOID AudioFillStatus(_In_ PDEVICE_CONTEXT Ctx, _Inout_ LDACA2DP_STATUS *Out);
+EVT_WDF_DEVICE_RELEASE_HARDWARE LdacA2dpEvtReleaseHardware;
 
 /* avdtp_glue.c */
 extern const avdtp_src_ops LdacA2dpAvdtpOps;

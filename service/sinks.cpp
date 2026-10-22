@@ -139,8 +139,11 @@ public:
             GetOverlappedResult(handle_, &pending_.front()->ov, &n, FALSE);
             CloseHandle(pending_.front()->ov.hEvent);
             pending_.pop_front();
+            completed_++;
         }
     }
+
+    unsigned long long Completed() const override { return completed_; }
 
     // TX queue depth for LDAC ABR: packets waiting behind the one being handed to
     // the controller. libldac only raises quality after 0.5 s with a depth of
@@ -155,6 +158,13 @@ public:
     }
 
     std::string Describe() const override { return describe_; }
+
+    HANDLE Detach()
+    {
+        HANDLE h = handle_;
+        handle_ = INVALID_HANDLE_VALUE;
+        return h;
+    }
 
     bool Probe(LDACA2DP_STATUS &st)
     {
@@ -280,7 +290,135 @@ private:
     std::atomic<bool> removing_{ false };
     Clock::time_point nextStatus_ = Clock::now() + std::chrono::seconds(1);
     std::deque<std::unique_ptr<Pending>> pending_;
+    unsigned long long completed_ = 0;
     std::string describe_;
+};
+
+// ---- the driver's audio endpoint as a source ------------------------------------
+
+// What applications play to the "LDAC A2DP" endpoint (ACX render circuit in the
+// driver), read with IOCTL_LDACA2DP_READ_PCM. The rate follows the endpoint
+// stream's format (Rate() changes; the session rebuilds its resampler).
+class EndpointSource : public AudioSource {
+public:
+    explicit EndpointSource(uint64_t address) : address_(address) {}
+
+    ~EndpointSource() override
+    {
+        if (handle_ != INVALID_HANDLE_VALUE) {
+            CancelIoEx(handle_, nullptr);
+            if (pending_) {
+                DWORD n;
+                GetOverlappedResult(handle_, &ov_, &n, TRUE);
+            }
+            CloseHandle(handle_);
+        }
+        if (ov_.hEvent)
+            CloseHandle(ov_.hEvent);
+    }
+
+    bool Start(std::string &err) override
+    {
+        DriverSink probe(address_);
+        LDACA2DP_STATUS st;
+        if (!probe.Probe(st))
+            return err = "no LdacA2dp device", false;
+        rate_ = st.PcmSampleRate ? st.PcmSampleRate : 48000;  // the INF default until a stream has run
+        handle_ = probe.Detach();
+        ov_.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        buffer_.resize(sizeof(LDACA2DP_PCM_HEADER) + 64 * 1024);
+        Resync();  // audio left in the driver from before this session
+        return true;
+    }
+
+    uint32_t Rate() const override { return rate_; }
+    int Channels() const override { return 2; }
+    bool DataMeansSound() const override { return true; }
+
+    std::string Describe() const override
+    {
+        return "LdacA2dp endpoint (" + std::to_string(rate_) + " Hz)";
+    }
+
+    bool Read(std::vector<float> &out, int timeoutMs) override
+    {
+        if (!pending_ && !Issue())
+            return false;
+        if (WaitForSingleObject(ov_.hEvent, timeoutMs) != WAIT_OBJECT_0)
+            return true;  // nothing rendered yet: silence for the caller
+        DWORD n = 0;
+        pending_ = false;
+        if (!GetOverlappedResult(handle_, &ov_, &n, FALSE))
+            return false;  // device gone
+        bool ok = Convert(n, out);
+        return ok && (pending_ || Issue());
+    }
+
+    void Resync() override
+    {
+        // drop what piled up before START
+        std::vector<float> scratch;
+        for (int i = 0; i < 20; i++) {
+            scratch.clear();
+            if (!Read(scratch, 0) || scratch.empty())
+                break;
+        }
+    }
+
+private:
+    bool Issue()
+    {
+        ResetEvent(ov_.hEvent);
+        if (!DeviceIoControl(handle_, IOCTL_LDACA2DP_READ_PCM, nullptr, 0, buffer_.data(), (DWORD)buffer_.size(),
+                             nullptr, &ov_) &&
+            GetLastError() != ERROR_IO_PENDING)
+            return false;
+        pending_ = true;
+        return true;
+    }
+
+    bool Convert(DWORD got, std::vector<float> &out)
+    {
+        if (got < sizeof(LDACA2DP_PCM_HEADER))
+            return true;
+        auto *h = reinterpret_cast<const LDACA2DP_PCM_HEADER *>(buffer_.data());
+        if (h->Channels != 2)
+            return true;  // the INF offers stereo only
+        if (h->SampleRate != rate_) {  // the endpoint stream was opened in another format
+            rate_ = h->SampleRate;
+            if (h->Bytes)
+                printf("endpoint format: %u Hz, %u-bit\n", rate_, h->ValidBits);
+        }
+        const uint8_t *p = buffer_.data() + sizeof(*h);
+        size_t samples = h->Bytes / (h->BitsPerSample / 8);
+        size_t base = out.size();
+        out.resize(base + samples);
+        if (h->Flags & LDACA2DP_PCM_FLOAT) {
+            memcpy(out.data() + base, p, samples * sizeof(float));
+        } else if (h->BitsPerSample == 16) {
+            for (size_t i = 0; i < samples; i++)
+                out[base + i] = reinterpret_cast<const int16_t *>(p)[i] / 32768.0f;
+        } else if (h->BitsPerSample == 32) {
+            for (size_t i = 0; i < samples; i++)
+                out[base + i] = (float)(reinterpret_cast<const int32_t *>(p)[i] / 2147483648.0);
+        } else if (h->BitsPerSample == 24) {
+            for (size_t i = 0; i < samples; i++) {
+                const uint8_t *b = p + 3 * i;
+                int32_t v = (int32_t)((uint32_t)b[0] << 8 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 24);
+                out[base + i] = (float)(v / 2147483648.0);
+            }
+        } else {
+            out.resize(base);
+        }
+        return true;
+    }
+
+    uint64_t address_;
+    HANDLE handle_ = INVALID_HANDLE_VALUE;
+    OVERLAPPED ov_{};
+    bool pending_ = false;
+    uint32_t rate_ = 48000;
+    std::vector<uint8_t> buffer_;
 };
 
 // ---- simulated link (no driver, no radio) ------------------------------------
@@ -349,12 +487,14 @@ public:
         while (!queue_.empty() && credit_ >= (double)queue_.front()) {
             credit_ -= (double)queue_.front();
             queue_.pop_front();
+            completed_++;
         }
         if (queue_.empty() && credit_ > 4096)
             credit_ = 4096;
     }
 
     unsigned QueueDepth() const override { return (unsigned)queue_.size(); }
+    unsigned long long Completed() const override { return completed_; }
     uint16_t Delay100us() override { return 1500; }
     std::string Describe() const override { return "simulated link"; }
 
@@ -371,6 +511,7 @@ private:
     static constexpr size_t kMaxQueue = LDACA2DP_MAX_INFLIGHT_MEDIA;
     std::vector<std::pair<double, double>> points_;
     std::deque<size_t> queue_;
+    unsigned long long completed_ = 0;
     double credit_ = 0;
     Clock::time_point start_, last_;
 };
@@ -387,6 +528,11 @@ int DriverLinkState(uint64_t address)
     DriverSink probe(address);
     LDACA2DP_STATUS st;
     return probe.Probe(st) ? (int)st.AvdtpState : -1;
+}
+
+std::unique_ptr<AudioSource> MakeEndpointSource(uint64_t address)
+{
+    return std::make_unique<EndpointSource>(address);
 }
 
 std::unique_ptr<MediaSink> MakeNullSink(const std::string &linkSpec)

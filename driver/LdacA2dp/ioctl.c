@@ -67,6 +67,7 @@ static VOID FillStatus(_In_ PDEVICE_CONTEXT Ctx, _Out_ LDACA2DP_STATUS *Out)
     Out->MediaPacketsSent = (UINT64)InterlockedCompareExchange64(&Ctx->MediaPacketsSent, 0, 0);
     Out->MediaPacketsFailed = (UINT64)InterlockedCompareExchange64(&Ctx->MediaPacketsFailed, 0, 0);
     Out->MediaInFlight = (UINT32)InterlockedCompareExchange(&Ctx->MediaInFlight, 0, 0);
+    AudioFillStatus(Ctx, Out);
 }
 
 VOID LdacA2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request, _In_ size_t OutputBufferLength,
@@ -114,6 +115,10 @@ VOID LdacA2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request, _I
             info = sizeof(LDACA2DP_STATUS);
         }
         break;
+
+    case IOCTL_LDACA2DP_READ_PCM:
+        AudioReadPcm(ctx, Request);
+        return;
 
     case IOCTL_LDACA2DP_SEND_MEDIA:
         status = WdfRequestRetrieveInputBuffer(Request, 13, &buffer, &length);

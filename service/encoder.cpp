@@ -111,6 +111,14 @@ public:
             ldacBT_set_eqmid(ldac_, eqmid_);
     }
 
+    void ResetQuality() override
+    {
+        if (!abr_)
+            return;
+        ldacBT_set_eqmid(ldac_, eqmid_);
+        ldac_ABR_Init(abr_, kAbrIntervalMs);  // forget the queue history of the start
+    }
+
     std::string Describe() const override
     {
         return std::string("LDAC ") + EqmidName(eqmid_) + (adaptive_ ? " + ABR" : "") + ", " +
