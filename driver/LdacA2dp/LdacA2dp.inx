@@ -102,6 +102,8 @@ HKR,,FriendlyName,,%LdacA2dp.Headphones.szPname%
 ; event-driven (pull) mode for the audio engine
 HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
 HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
+; a new endpoint starts at -20 dB (~25 %), not at full volume: the level goes to the headphones
+HKR,EP\0,%PKEY_AudioEndpoint_Default_VolumeInDb%,0x00010001,0xFFEC0000
 
 [Strings]
 ; non-localizable
@@ -113,6 +115,7 @@ KSCATEGORY_REALTIME = "{EB115FFC-10C8-4964-831D-6DCB02E6F23F}"
 KSNODETYPE_ANY      = "{00000000-0000-0000-0000-000000000000}"
 PKEY_AudioEndpoint_Association               = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2"
 PKEY_AudioEndpoint_Supports_EventDriven_Mode = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},7"
+PKEY_AudioEndpoint_Default_VolumeInDb        = "{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},9"
 
 ManufacturerName     = "LDAC A2DP Project"
 DiskName             = "LDAC A2DP Installation Disk"

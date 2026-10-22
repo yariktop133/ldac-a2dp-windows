@@ -81,7 +81,7 @@ void avrcp_disconnected(avrcp *a);
 /* One received AVCTP packet. Returns 0 if understood, -1 if malformed. */
 int avrcp_input(avrcp *a, const uint8_t *buf, size_t len);
 /* Absolute volume 0..127. Returns 0 if sent or queued, -1 if the headphones
- * have no absolute volume (or it is not known yet). */
+ * have no absolute volume, or have not reported their own volume yet. */
 int avrcp_set_volume(avrcp *a, uint8_t volume);
 /* Local playback state for the headphones (PLAYBACK_STATUS notification). */
 void avrcp_set_playing(avrcp *a, int playing);

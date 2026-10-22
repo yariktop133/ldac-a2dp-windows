@@ -90,6 +90,8 @@ void test_avrcp(void)
     CHECK(sent_is(0, "10110e034800001958310000050d00000000"));
     CHECK_EQ(a.abs_volume, AVRCP_ABSVOL_YES);
 
+    CHECK_EQ(avrcp_set_volume(&a, 127), -1); /* their volume not reported yet: never push ours first */
+
     /* TG: PLAYBACK_STATUS and TRACK_CHANGED interim, byte-identical to Windows */
     CHECK_EQ(feed(&a, "20110e034800001958310000050100000000"), 1);
     CHECK(sent_is(0, "22110e0f4800001958310000020102"));

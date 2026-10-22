@@ -364,7 +364,10 @@ int avrcp_input(avrcp *a, const uint8_t *buf, size_t len)
 
 int avrcp_set_volume(avrcp *a, uint8_t volume)
 {
-    if (!a->connected || a->abs_volume != AVRCP_ABSVOL_YES)
+    /* Not before the headphones told us theirs: on connect their volume wins
+     * (it moves Windows' slider), so a stale or default Windows level never
+     * blasts them at full volume. */
+    if (!a->connected || a->abs_volume != AVRCP_ABSVOL_YES || a->volume == AVRCP_VOLUME_UNKNOWN)
         return -1;
     volume &= AVRCP_VOLUME_MAX;
     if (a->set_pending) {
