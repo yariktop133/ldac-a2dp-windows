@@ -175,7 +175,12 @@ bool LoadSettings(const std::string &address, DeviceSettings &out, std::string &
     }
     std::stringstream ss;
     ss << f.rdbuf();
-    std::string text = ss.str();
+    return ParseSettings(ss.str(), address, out, note);
+}
+
+bool ParseSettings(std::string text, const std::string &address, DeviceSettings &out, std::string &note)
+{
+    out = DeviceSettings();
     if (text.size() >= 3 && (unsigned char)text[0] == 0xEF)
         text.erase(0, 3);  // UTF-8 BOM
 

@@ -78,7 +78,10 @@ public:
         link.ldacCm = st.LdacChannelMode;
         link.mtu = st.MediaMtu;
         link.delay100us = st.DelayReport100us;
-        describe_ = "LdacA2dp driver, " + FormatAddress(st.RemoteAddress);
+        if (st.Codec == LdacA2dpCodecSbc &&
+            a2dp_sbc_parse(A2DP_CODEC_SBC, st.SbcConfig, sizeof(st.SbcConfig), &link.sbc) != 0)
+            return err = "driver reported an unreadable SBC configuration", false;
+        describe_ ="LdacA2dp driver, " + FormatAddress(st.RemoteAddress);
         return true;
     }
 
@@ -230,13 +233,22 @@ public:
         a2dp_ldac peer = { LDAC_FREQ_44100 | LDAC_FREQ_48000 | LDAC_FREQ_88200 | LDAC_FREQ_96000,
                            LDAC_CM_STEREO | LDAC_CM_DUAL | LDAC_CM_MONO };
         a2dp_config cfg;
-        if (!prefs.allow_ldac || a2dp_select_ldac(&local, &peer, prefs.ldac_pref_rate, &cfg) != 0)
-            return err = "simulated sink: no LDAC configuration (SBC is not encoded yet)", false;
-        link.codec = "LDAC";
+        link.mtu = 679;
+        if (prefs.allow_ldac && a2dp_select_ldac(&local, &peer, prefs.ldac_pref_rate, &cfg) == 0) {
+            link.codec = "LDAC";
+            link.ldacCm = cfg.ldac.cm;
+        } else {
+            // SBC fallback: our source capabilities against the JBL SBC SEP (3f ff 02 35).
+            a2dp_sbc src = { SBC_FREQ_44100 | SBC_FREQ_48000, 0x0F, 0xF0, 0x0C, 0x03, 2, SBC_BITPOOL_HQ };
+            a2dp_sbc jbl = { SBC_FREQ_44100 | SBC_FREQ_48000, 0x0F, 0xF0, 0x0C, 0x03, 2, 53 };
+            if (a2dp_select_sbc(&src, &jbl, prefs.sbc_pref_rate, &cfg) != 0)
+                return err = "simulated sink: no common configuration", false;
+            link.codec = "SBC";
+            link.sbc = cfg.sbc;
+            link.ldacCm = cfg.channels == 1 ? LDAC_CM_MONO : LDAC_CM_STEREO;
+        }
         link.sampleRate = cfg.sample_rate;
         link.channels = cfg.channels;
-        link.ldacCm = cfg.ldac.cm;
-        link.mtu = 679;
         link.delay100us = 1500;
         start_ = last_ = Clock::now();
         return true;

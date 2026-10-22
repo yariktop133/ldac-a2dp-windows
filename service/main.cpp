@@ -1,7 +1,10 @@
 // ldacsvc - see svc.h.
 //
 //   ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source loopback[:endpoint]|wav:file]
-//           [--sink driver|null] [--link T:KBPS,...] [--seconds N] [-v]
+//           [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]
+//
+// --dump writes the bare codec frames (media packets without RTP and payload
+// headers): raw SBC can be decoded with `ffmpeg -f sbc -i file out.wav`.
 //
 // --sink null runs the whole pipeline against a simulated radio link, so the
 // encoder, ABR and status reporting can be checked without the driver.
@@ -28,12 +31,12 @@ static void Usage()
 {
     fprintf(stderr,
             "usage: ldacsvc [--address AA:BB:CC:DD:EE:FF] [--source loopback[:endpoint]|wav:file]\n"
-            "               [--sink driver|null] [--link T:KBPS,...] [--seconds N] [-v]\n");
+            "               [--sink driver|null] [--link T:KBPS,...] [--seconds N] [--dump file] [-v]\n");
 }
 
 int main(int argc, char **argv)
 {
-    std::string address, source = "loopback", sinkKind = "driver", link = "0:2000";
+    std::string address, source = "loopback", sinkKind = "driver", link = "0:2000", dumpPath;
     double seconds = 0;
     bool verbose = false;
 
@@ -45,6 +48,7 @@ int main(int argc, char **argv)
         else if (a == "--sink") sinkKind = next();
         else if (a == "--link") link = next();
         else if (a == "--seconds") seconds = atof(next().c_str());
+        else if (a == "--dump") dumpPath = next();
         else if (a == "-v") verbose = true;
         else return Usage(), 2;
     }
@@ -76,12 +80,16 @@ int main(int argc, char **argv)
     printf("link: %s, %s %u Hz %s, MTU %d, delay %.1f ms\n", sink->Describe().c_str(), info.codec.c_str(),
            info.sampleRate, ChannelModeName(info.ldacCm).c_str(), info.mtu, info.delay100us / 10.0);
 
-    LdacEncoder enc;
-    bool s16 = !settings.bits24;
-    if (!enc.Init(info, settings.eqmid, settings.adaptive, s16, err))
+    if (info.codec != "SBC" && info.codec != "LDAC")
+        return fprintf(stderr, "encoder: unsupported codec %s\n", info.codec.c_str()), 1;
+    std::unique_ptr<AudioEncoder> enc = info.codec == "SBC" ? MakeSbcEncoder() : MakeLdacEncoder();
+    if (!enc->Init(info, settings, err))
         return fprintf(stderr, "encoder: %s\n", err.c_str()), 1;
-    printf("encoder: LDAC %s%s, %s input\n", EqmidName(settings.eqmid), settings.adaptive ? " + ABR" : "",
-           s16 ? "16-bit" : "float");
+    printf("encoder: %s\n", enc->Describe().c_str());
+
+    FILE *dump = nullptr;
+    if (!dumpPath.empty() && !(dump = fopen(dumpPath.c_str(), "wb")))
+        return fprintf(stderr, "cannot create %s\n", dumpPath.c_str()), 1;
 
     // source
     std::unique_ptr<AudioSource> src;
@@ -101,7 +109,7 @@ int main(int argc, char **argv)
     auto start = Clock::now(), lastSound = start, nextTick = start, nextReport = start + std::chrono::seconds(1);
     bool streaming = false, finished = false;
     unsigned long long sent = 0, dropped = 0, sentBytes = 0, sentAtReport = 0, bytesAtReport = 0;
-    int bitDepth = s16 ? 16 : 24;
+    int bitDepth = enc->BitDepth();
 
     while (!g_stop && !finished) {
         in.clear();
@@ -144,8 +152,10 @@ int main(int argc, char **argv)
                 frames = mapped.data();
             }
             packets.clear();
-            enc.Encode(frames, count, packets);
+            enc->Encode(frames, count, packets);
             for (auto &p : packets) {
+                if (dump && p.size() > 13)
+                    fwrite(p.data() + 13, 1, p.size() - 13, dump);  // skip RTP (12) + payload header (1)
                 if (sink->Send(p.data(), p.size())) {
                     sent++;
                     sentBytes += p.size();
@@ -157,16 +167,16 @@ int main(int argc, char **argv)
         sink->Pump();
 
         if (now >= nextTick) {
-            enc.Tick(sink->QueueDepth());
-            nextTick += std::chrono::milliseconds(LdacEncoder::kAbrIntervalMs);
+            enc->Tick(sink->QueueDepth());
+            nextTick += std::chrono::milliseconds(AudioEncoder::kAbrIntervalMs);
             if (nextTick < now)
                 nextTick = now;
         }
         if (now >= nextReport) {
             double t = std::chrono::duration<double>(now - start).count();
-            WriteStatus(address, info, bitDepth, enc.NominalKbps());
-            printf("%7.1fs %-9s %s %4d kbps | %4llu pkt/s %5.0f kbit/s on air | queue %2u | dropped %llu\n", t,
-                   streaming ? "streaming" : "suspended", EqmidName(enc.Eqmid()), enc.NominalKbps(),
+            WriteStatus(address, info, bitDepth, enc->NominalKbps());
+            printf("%7.1fs %-9s %-4s %4d kbps | %4llu pkt/s %5.0f kbit/s on air | queue %2u | dropped %llu\n", t,
+                   streaming ? "streaming" : "suspended", enc->Quality().c_str(), enc->NominalKbps(),
                    sent - sentAtReport, (sentBytes - bytesAtReport) * 8 / 1000.0, sink->QueueDepth(), dropped);
             fflush(stdout);
             sentAtReport = sent;
@@ -179,6 +189,8 @@ int main(int argc, char **argv)
 
     if (streaming)
         sink->Suspend();
+    if (dump)
+        fclose(dump);
     ClearStatus(address);
     printf("done: %llu packets sent, %llu dropped\n", sent, dropped);
     return 0;

@@ -31,6 +31,23 @@ if(MSVC)
     target_compile_options(ldacBT_abr PRIVATE /W1)
 endif()
 
+# --- SBC encoder (AOSP system/embdrv/sbc/encoder, Apache-2.0) ---------------
+set(SBC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sbc_encoder)
+add_library(sbc_enc STATIC
+    ${SBC_DIR}/srce/sbc_analysis.c
+    ${SBC_DIR}/srce/sbc_dct.c
+    ${SBC_DIR}/srce/sbc_dct_coeffs.c
+    ${SBC_DIR}/srce/sbc_enc_bit_alloc_mono.c
+    ${SBC_DIR}/srce/sbc_enc_bit_alloc_ste.c
+    ${SBC_DIR}/srce/sbc_enc_coeffs.c
+    ${SBC_DIR}/srce/sbc_encoder.c
+    ${SBC_DIR}/srce/sbc_packing.c)
+target_include_directories(sbc_enc PUBLIC ${SBC_DIR}/include)
+if(MSVC)
+    target_compile_options(sbc_enc PRIVATE /W1
+        /FI${CMAKE_CURRENT_SOURCE_DIR}/third_party/compat/sbc_msvc_compat.h)
+endif()
+
 # --- AVDTP / A2DP protocol core --------------------------------------------
 # Plain C, no heap, no CRT beyond memcpy/memset: the same sources are meant
 # to be compiled into the KMDF driver later (stage 4).
@@ -51,15 +68,18 @@ add_executable(ldacenc tools/ldacenc/ldacenc.c tools/ldacenc/wav.c)
 target_link_libraries(ldacenc PRIVATE ldacBT_abr ldacBT_enc avdtp)
 
 # --- encoder service (user mode) --------------------------------------------
-add_executable(ldacsvc
-    service/main.cpp service/settings.cpp service/capture.cpp service/resampler.cpp
-    service/encoder.cpp service/sinks.cpp tools/ldacenc/wav.c)
-target_compile_features(ldacsvc PRIVATE cxx_std_17)
-target_compile_definitions(ldacsvc PRIVATE UNICODE _UNICODE NOMINMAX)
-target_link_libraries(ldacsvc PRIVATE ldacBT_abr ldacBT_enc avdtp ole32 cfgmgr32)
+add_library(ldacsvc_core STATIC
+    service/settings.cpp service/capture.cpp service/resampler.cpp
+    service/encoder.cpp service/sbc.cpp service/sinks.cpp tools/ldacenc/wav.c)
+target_compile_features(ldacsvc_core PUBLIC cxx_std_17)
+target_compile_definitions(ldacsvc_core PUBLIC UNICODE _UNICODE NOMINMAX)
+target_link_libraries(ldacsvc_core PUBLIC ldacBT_abr ldacBT_enc sbc_enc avdtp ole32 cfgmgr32)
 if(MSVC)
-    target_compile_options(ldacsvc PRIVATE /W4 /utf-8)
+    target_compile_options(ldacsvc_core PUBLIC /W4 /utf-8)
 endif()
+
+add_executable(ldacsvc service/main.cpp)
+target_link_libraries(ldacsvc PRIVATE ldacsvc_core)
 
 # --- tests ------------------------------------------------------------------
 enable_testing()
@@ -72,3 +92,7 @@ add_executable(avdtp_tests
     avdtp/tests/sim_sink.c)
 target_link_libraries(avdtp_tests PRIVATE avdtp)
 add_test(NAME avdtp_tests COMMAND avdtp_tests)
+
+add_executable(service_tests service/tests/service_tests.cpp)
+target_link_libraries(service_tests PRIVATE ldacsvc_core)
+add_test(NAME service_tests COMMAND service_tests)

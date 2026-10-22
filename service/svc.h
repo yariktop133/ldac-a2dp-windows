@@ -32,15 +32,17 @@ struct DeviceSettings {
 std::string DataRoot();  // %ProgramData%\LdacA2dp
 // Missing file or device: defaults, returns false with a reason in `note`.
 bool LoadSettings(const std::string &address, DeviceSettings &out, std::string &note);
+bool ParseSettings(std::string json, const std::string &address, DeviceSettings &out, std::string &note);
 a2dp_prefs ToPrefs(const DeviceSettings &s);
 
 struct LinkInfo {
-    std::string codec;      // "LDAC" (SBC is not encoded yet)
+    std::string codec;      // "LDAC" or "SBC"
     uint32_t sampleRate = 0;
     int channels = 2;
     uint8_t ldacCm = LDAC_CM_STEREO;
     int mtu = 679;
     uint16_t delay100us = 0;
+    a2dp_sbc sbc{};         // single-choice SBC configuration when codec == "SBC"
 };
 
 void WriteStatus(const std::string &address, const LinkInfo &link, int bitDepth, int kbps);
@@ -80,34 +82,26 @@ private:
     std::vector<double> kernel_;
 };
 
-// ---- LDAC encoder (encoder.cpp) ----------------------------------------------
+// ---- encoders (encoder.cpp: LDAC, sbc.cpp: SBC) --------------------------------
 
-class LdacEncoder {
+class AudioEncoder {
 public:
-    ~LdacEncoder();
-    bool Init(const LinkInfo &link, int eqmid, bool adaptive, bool s16, std::string &err);
+    virtual ~AudioEncoder() = default;
+    virtual bool Init(const LinkInfo &link, const DeviceSettings &settings, std::string &err) = 0;
     // Encodes interleaved float frames (link.channels wide); every finished
     // media packet (RTP + payload header + frames) is appended to `packets`.
-    void Encode(const float *frames, size_t count, std::vector<std::vector<uint8_t>> &packets);
-    void Tick(unsigned txQueueDepth);  // every kAbrIntervalMs
-    int Eqmid() const;
-    int NominalKbps() const;
+    virtual void Encode(const float *frames, size_t count, std::vector<std::vector<uint8_t>> &packets) = 0;
+    virtual void Tick(unsigned txQueueDepth) { (void)txQueueDepth; }  // every kAbrIntervalMs
+    virtual std::string Describe() const = 0;  // configuration, for the log
+    virtual std::string Quality() const = 0;   // current quality step, for the log
+    virtual int NominalKbps() const = 0;
+    virtual int BitDepth() const = 0;          // input resolution reported to the UI
 
     static constexpr unsigned kAbrIntervalMs = 20;
-
-private:
-    void *ldac_ = nullptr;  // HANDLE_LDAC_BT
-    void *abr_ = nullptr;   // HANDLE_LDAC_ABR
-    std::vector<uint8_t> acc_;
-    int bytesPerFrame_ = 0;
-    bool s16_ = false;
-    int channels_ = 2;
-    size_t mtu_ = 679;
-    uint32_t rate_ = 48000;
-    int eqmid_ = 1;         // quality the user chose: ABR never goes above it
-    int maxEqmidKbps_ = 660;
-    void *media_ = nullptr; // avdtp_media_stream
 };
+
+std::unique_ptr<AudioEncoder> MakeLdacEncoder();
+std::unique_ptr<AudioEncoder> MakeSbcEncoder();
 
 const char *EqmidName(int eqmid);
 int EqmidKbps(int eqmid, uint32_t rate);
