@@ -9,7 +9,7 @@ jobs:
     name: Protocol core, codecs, service, tests
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build and test (build.cmd)
         shell: cmd
         run: build.cmd
@@ -18,8 +18,8 @@ jobs:
     name: Settings utility
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
       - run: dotnet build ui/LdacConfig -c Release
@@ -30,7 +30,7 @@ jobs:
     # Needs a WDK with ACX 1.1 on the runner image; not guaranteed, so it may not block the build.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build (build_driver.cmd Release)
         shell: cmd
-        run: build_driver.cmd Release -p:SignMode=Off
+        run: build_driver.cmd Release
