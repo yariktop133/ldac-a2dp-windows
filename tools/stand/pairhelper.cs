@@ -48,6 +48,12 @@ static class Program
                     DevicePairingKinds.DisplayPin | DevicePairingKinds.ProvidePin;
         var result = custom.PairAsync(kinds, DevicePairingProtectionLevel.Default).AsTask().Result;
         Console.WriteLine("status: " + result.Status + ", protection: " + result.ProtectionLevelUsed);
+        if (result.Status == DevicePairingResultStatus.RequiredHandlerNotRegistered)
+        {
+            // a ceremony custom pairing does not offer: let Windows run its own (basic pairing)
+            result = target.Pairing.PairAsync().AsTask().Result;
+            Console.WriteLine("basic pairing status: " + result.Status + ", protection: " + result.ProtectionLevelUsed);
+        }
         return result.Status == DevicePairingResultStatus.Paired || result.Status == DevicePairingResultStatus.AlreadyPaired ? 0 : 1;
     }
 }
